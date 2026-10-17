@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="dsh-moyu">
+  <!--
+    The plugin's own icon.
+
+    Design: a round token (the economy is built on round coins — 硬币 / 铁锭 /
+    金币, "size means denomination") sitting inside a check ring, which is the
+    one thing this plugin is actually for: signing in every day.
+
+    Deliberately no text and no emoji: an emoji renders differently on every
+    platform, and at 28px in a plugin list a glyph is more legible than a word.
+
+    The gradient uses the same two hues the panel's own cards use, so the icon
+    and the UI read as the same object.
+  -->
+  <defs>
+    <linearGradient id="moyu-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f0c05a"/>
+      <stop offset="100%" stop-color="#d9992a"/>
+    </linearGradient>
+    <linearGradient id="moyu-blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6f8bff"/>
+      <stop offset="100%" stop-color="#4d6bfe"/>
+    </linearGradient>
+  </defs>
+
+  <!-- backdrop -->
+  <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#moyu-blue)"/>
+
+  <!-- token -->
+  <circle cx="32" cy="32" r="16" fill="url(#moyu-gold)"/>
+  <circle cx="32" cy="32" r="12.5" fill="none" stroke="#b8791a" stroke-opacity="0.55" stroke-width="1.6"/>
+
+  <!-- check mark: the "sign in" part -->
+  <path d="M25.4 32.4 L30.2 37.2 L39 27.6"
+        fill="none" stroke="#5b3a06" stroke-width="3.4"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

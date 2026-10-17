@@ -8,8 +8,18 @@
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "dist"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/yizhiyangyangqwq/dsh-moyu"
