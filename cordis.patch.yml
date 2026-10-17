@@ -1,0 +1,8 @@
+# dsh-moyu bundle patch.
+#
+# One `insert` mounts the Host half as its own Loader row. The browser half is
+# declared by package.json's `dsh.client` and binds to the row whose name is the
+# bare package name, so this row must keep `name` exactly as written below.
+- insert:
+    - id: dsh-moyu
+      name: '@local/dsh-moyu'
