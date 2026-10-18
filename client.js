@@ -655,6 +655,18 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      /** Clear the automatic-update banner for this version. */
+      const dismissAutoUpdate = React.useCallback(async () => {
+        try {
+          const next = await post('/update-dismiss')
+          setData(next)
+          return next.result
+        } catch {
+          // Purely an acknowledgement; a failure must not surface as an error.
+          return null
+        }
+      }, [])
+
       const checkUpdate = React.useCallback(async () => {
         setBusy(true)
         try {
@@ -891,6 +903,7 @@ window.__ModuleLoader__.load({
         checkUpdate,
         applyUpdate,
         markNoticeRead,
+        dismissAutoUpdate,
         fishCast,
         fishStrike,
         buyRod,
@@ -909,33 +922,41 @@ window.__ModuleLoader__.load({
     // ── the settings row ─────────────────────────────────────────────────────
 
     /**
-     * A sign-in row inside DSH's own 设置 page.
+     * The 摸鱼 section inside DSH's settings page.
      *
-     * The third door, and the only one that does not require opening the plugin:
-     * 设置 is somewhere a player already goes, so a claimable count there turns
-     * 签到 into something you cannot forget rather than a place you must remember
-     * to visit. That is the same argument the footer badge makes, taken one step
-     * closer to where the user already is.
+     * A SECTION, not a row. It used to be one line in 通用, squeezed between the
+     * performance picker and an unrelated toggle — which read as noise rather
+     * than as a feature. A section gets its own entry in the settings navigation
+     * and room to show what is actually claimable.
      *
-     * Deliberately NOT a settings page of its own: DSH's General section is a
-     * column of rows, and a whole page for "claim" would be heavier than the
-     * feature. So it is one compact row — count, a claim button, and a link to
-     * the full panel for anything more.
+     * One click claims everything ready. Per-period detail stays in the panel,
+     * which this links to; duplicating the whole check-in UI here would be a
+     * second implementation of the same screen to keep in sync.
      */
-    function SettingsCheckinRow({ onOpenPanel }) {
+    function SettingsCheckinSection({ onOpenPanel }) {
       const { data, error, busy, claimAll, reload } = useCheckin(BADGE_POLL_MS)
       const [note, setNote] = React.useState(null)
 
       if (data === null) {
         return h(
           'div',
-          { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)', padding: '4px 0' } },
+          { style: { fontSize: '13px', color: 'var(--dsw-alias-label-tertiary)', padding: '8px 0' } },
           error === null ? '正在读取签到…' : `读不到签到数据：${error}`,
         )
       }
 
-      const ready = data.state.readyCount
-      const level = data.state.level
+      const state = data.state
+      const ready = state.readyCount
+      const level = state.level
+      /**
+       * The period rows live on `state.periods`.
+       *
+       * The snapshot's TOP-LEVEL `periods` is the static catalogue
+       * (key/label/short/accent) with no readiness on it — reading that one would
+       * render a list of labels that never shows anything as claimable. Each entry
+       * here carries `ready` and `readyAt`.
+       */
+      const periods = state.periods ?? []
 
       const handleClaim = async () => {
         setNote(null)
@@ -944,100 +965,194 @@ window.__ModuleLoader__.load({
           const claimed = result?.claimed ?? 0
           if (claimed === 0) setNote({ kind: 'idle', text: '没有可以领的了。' })
           else setNote({ kind: 'ok', text: `领了 ${claimed} 项。` })
-          // The badge and the panel poll on their own clocks; this row decides
-          // nothing itself, so a refresh keeps it honest without duplicating state.
           await reload()
         } catch (err) {
           setNote({ kind: 'bad', text: err instanceof Error ? err.message : String(err) })
         }
       }
 
+      /** A countdown for the next period that is not ready yet. */
+      const untilReady = (readyAt) => {
+        const left = Math.max(0, (readyAt ?? 0) - Date.now())
+        if (left <= 0) return '可领'
+        return formatCountdown(left)
+      }
+
       return h(
         'div',
-        { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
+        { style: { display: 'flex', flexDirection: 'column', gap: '16px' } },
+
+        // ── heading ──
         h(
           'div',
-          { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
+          { style: { display: 'flex', flexDirection: 'column', gap: '3px' } },
+          h('div', { style: { fontSize: '15px', fontWeight: 600 } }, '摸鱼'),
           h(
             'div',
-            { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },
-            h(
-              'div',
-              { style: { fontSize: '13px', color: 'var(--dsw-alias-label-primary)' } },
-              ready > 0 ? `${ready} 项可以领` : `没有可领的（Lv.${level}）`,
-            ),
-            h(
-              'div',
-              { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
-              ready > 0
-                ? '一键领完所有就绪的签到。要逐项看，点右边打开面板。'
-                : '签到会随时间长出来；也可以直接打开面板看全部周期。',
-            ),
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              onClick: handleClaim,
-              disabled: busy || ready === 0,
-              style: {
-                flex: 'none',
-                height: '28px',
-                padding: '0 12px',
-                borderRadius: 'var(--dsw-radius-md)',
-                border: ready === 0 ? '1px solid var(--dsw-alias-border-l2)' : 'none',
-                background: ready === 0 ? 'transparent' : 'var(--dsw-alias-brand-primary)',
-                color: ready === 0 ? 'var(--dsw-alias-label-tertiary)' : 'var(--dsw-alias-label-primary-inverted)',
-                fontFamily: 'inherit',
-                fontSize: '12px',
-                cursor: busy || ready === 0 ? 'not-allowed' : 'pointer',
-                whiteSpace: 'nowrap',
-              },
-            },
-            busy ? '处理中…' : ready > 0 ? `全部领取（${ready}）` : '暂无可领',
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              onClick: onOpenPanel,
-              style: {
-                flex: 'none',
-                height: '28px',
-                padding: '0 10px',
-                borderRadius: 'var(--dsw-radius-md)',
-                border: '1px solid var(--dsw-alias-border-l2)',
-                background: 'transparent',
-                color: 'var(--dsw-alias-label-secondary)',
-                fontFamily: 'inherit',
-                fontSize: '12px',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              },
-            },
-            '打开签到',
+            { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' } },
+            '每日签到与缓慢养成。不用打开插件面板，这里也能领。',
           ),
         ),
-        note === null
+
+        // ── the claim card ──
+        h(
+          'div',
+          {
+            style: {
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              padding: '14px 16px',
+              borderRadius: 'var(--dsw-radius-lg)',
+              border: '0.5px solid var(--dsw-alias-border-l2)',
+              background: 'var(--dsw-alias-bg-layer-2)',
+            },
+          },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
+            h(
+              'div',
+              { style: { flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' } },
+              h(
+                'div',
+                { style: { fontSize: '14px', fontWeight: 500 } },
+                ready > 0 ? `${ready} 项可以领` : '暂时没有可领的',
+              ),
+              h(
+                'div',
+                { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' } },
+                `Lv.${level}　·　签到会随时间长出来`,
+              ),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                onClick: handleClaim,
+                disabled: busy || ready === 0,
+                style: {
+                  flex: 'none',
+                  height: '30px',
+                  padding: '0 14px',
+                  borderRadius: 'var(--dsw-radius-md)',
+                  border: ready === 0 ? '1px solid var(--dsw-alias-border-l2)' : 'none',
+                  background: ready === 0 ? 'transparent' : 'var(--dsw-alias-brand-primary)',
+                  color:
+                    ready === 0
+                      ? 'var(--dsw-alias-label-tertiary)'
+                      : 'var(--dsw-alias-label-primary-inverted)',
+                  fontFamily: 'inherit',
+                  fontSize: '12.5px',
+                  cursor: busy || ready === 0 ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap',
+                },
+              },
+              busy ? '处理中…' : ready > 0 ? `全部领取（${ready}）` : '暂无可领',
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                onClick: onOpenPanel,
+                style: {
+                  flex: 'none',
+                  height: '30px',
+                  padding: '0 12px',
+                  borderRadius: 'var(--dsw-radius-md)',
+                  border: '1px solid var(--dsw-alias-border-l2)',
+                  background: 'transparent',
+                  color: 'var(--dsw-alias-label-secondary)',
+                  fontFamily: 'inherit',
+                  fontSize: '12.5px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                },
+              },
+              '打开完整面板',
+            ),
+          ),
+          note === null
+            ? null
+            : h(
+                'div',
+                {
+                  style: {
+                    fontSize: '12px',
+                    color:
+                      note.kind === 'bad'
+                        ? 'var(--dsw-alias-state-error-primary)'
+                        : note.kind === 'ok'
+                          ? 'var(--dsw-alias-state-success-primary)'
+                          : 'var(--dsw-alias-label-tertiary)',
+                  },
+                },
+                note.text,
+              ),
+        ),
+
+        // ── the periods, so this page is not just a button ──
+        periods.length === 0
           ? null
           : h(
               'div',
-              {
-                style: {
-                  fontSize: '11.5px',
-                  color:
-                    note.kind === 'bad'
-                      ? 'var(--dsw-alias-state-error-primary)'
-                      : note.kind === 'ok'
-                        ? 'var(--dsw-alias-state-success-primary)'
-                        : 'var(--dsw-alias-label-tertiary)',
+              { style: { display: 'flex', flexDirection: 'column' } },
+              h(
+                'div',
+                {
+                  style: {
+                    fontSize: '11px',
+                    letterSpacing: '.14em',
+                    color: 'var(--dsw-alias-label-quaternary)',
+                    marginBottom: '4px',
+                  },
                 },
-              },
-              note.text,
+                '签到周期',
+              ),
+              periods.map((entry) =>
+                h(
+                  'div',
+                  {
+                    key: entry.key,
+                    style: {
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '9px 2px',
+                      borderBottom: '0.5px solid var(--dsw-alias-border-l1)',
+                    },
+                  },
+                  h(
+                    'div',
+                    { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', alignItems: 'baseline', gap: '8px' } },
+                    h('span', { style: { fontSize: '13px' } }, entry.label),
+                    h(
+                      'span',
+                      { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-quaternary)' } },
+                      entry.short ?? '',
+                    ),
+                  ),
+                  h(
+                    'div',
+                    {
+                      style: {
+                        flex: 'none',
+                        fontSize: '12px',
+                        fontWeight: entry.ready ? 600 : 400,
+                        color: entry.ready
+                          ? 'var(--dsw-alias-state-success-primary)'
+                          : 'var(--dsw-alias-label-quaternary)',
+                        whiteSpace: 'nowrap',
+                        fontVariantNumeric: 'tabular-nums',
+                      },
+                    },
+                    entry.ready ? '可领' : untilReady(entry.readyAt),
+                  ),
+                ),
+              ),
             ),
       )
     }
-
     // ── the always-visible badge ─────────────────────────────────────────────
 
     /**
@@ -2325,6 +2440,104 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // ── the automatic update popup ───────────────────────────────────────────
+
+    /**
+     * A one-line banner announcing a version found by the AUTOMATIC checker.
+     *
+     * It is separate from the 公告 page on purpose: an automatic check runs while
+     * the player is doing something else, and a discovery that only shows up
+     * after navigating to a tab nobody opened is not an announcement at all.
+     *
+     * Dismissal is explicit and one-way for this particular discovery:
+     * `announceAt` is cleared on the host, so reopening the panel does not bring
+     * the same version back. A NEWER version found later sets it again.
+     */
+    function AutoUpdateBanner({ notice, onDismiss, onOpen }) {
+      const auto = notice?.autoCheck
+      if (auto === null || auto === undefined) return null
+      if (auto.found !== true || auto.announceAt === null) return null
+
+      return h(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '11px 14px',
+            borderRadius: 'var(--dsw-radius-lg)',
+            border: '1px solid var(--dsw-alias-border-l2)',
+            background: 'var(--dsw-alias-bg-layer-2)',
+          },
+        },
+        h(
+          'span',
+          { style: { flex: 'none', fontSize: '15px' }, 'aria-hidden': true },
+          '✦',
+        ),
+        h(
+          'div',
+          { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },
+          h(
+            'div',
+            { style: { fontSize: '13px' } },
+            `发现新版本 ${auto.latest}（当前 ${auto.current}）`,
+          ),
+          h(
+            'div',
+            { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
+            '自动检查发现的。去「公告」看看改了什么。',
+          ),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            onClick: onOpen,
+            style: {
+              flex: 'none',
+              height: '28px',
+              padding: '0 12px',
+              borderRadius: 'var(--dsw-radius-md)',
+              border: 'none',
+              background: 'var(--dsw-alias-brand-primary)',
+              color: 'var(--dsw-alias-label-primary-inverted)',
+              fontFamily: 'inherit',
+              fontSize: '12px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            },
+          },
+          '去看',
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            onClick: onDismiss,
+            title: '不再提示这个版本',
+            style: {
+              flex: 'none',
+              width: '28px',
+              height: '28px',
+              borderRadius: 'var(--dsw-radius-md)',
+              border: '1px solid var(--dsw-alias-border-l2)',
+              background: 'transparent',
+              color: 'var(--dsw-alias-label-tertiary)',
+              fontFamily: 'inherit',
+              fontSize: '14px',
+              lineHeight: 1,
+              cursor: 'pointer',
+            },
+            'aria-label': '关闭提示',
+          },
+          '×',
+        ),
+      )
+    }
+
+    /** The settings row for 自动检查更新, disabled while the master switch is off. */
     // ── the panel ────────────────────────────────────────────────────────────
 
     function CheckinPage() {
@@ -2360,6 +2573,7 @@ window.__ModuleLoader__.load({
         checkUpdate,
         applyUpdate,
         markNoticeRead,
+        dismissAutoUpdate,
         fishCast,
         fishStrike,
         buyRod,
@@ -2956,6 +3170,17 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
+
+        // ── automatic update announcement ──
+        // Above the tabs so it is the first thing seen when the panel opens. It
+        // renders nothing at all when no automatic check has found anything.
+        h(AutoUpdateBanner, {
+          notice: data.notice,
+          onOpen: () => setTab('notice'),
+          onDismiss: () => {
+            dismissAutoUpdate().catch(() => {})
+          },
+        }),
 
         // ── tabs ──
         // Only the claim tab carries a count, and only while something is
@@ -5753,6 +5978,14 @@ window.__ModuleLoader__.load({
     const AUTHOR_HOME = 'https://space.bilibili.com/3546957540755997'
 
     /**
+     * The repository, and the one place a fork has to change it.
+     *
+     * Same reasoning as `AUTHOR_HOME`: the 关于页的 Star 按钮 and any install
+     * hint must not drift to two different URLs.
+     */
+    const REPO_URL = 'https://github.com/yizhiyangyangqwq/dsh-moyu'
+
+    /**
      * 关于 — the one page that is pure talk.
      *
      * It shows the author, why the plugin exists, and (in a small print) how
@@ -5917,6 +6150,69 @@ window.__ModuleLoader__.load({
             // "never on its own", not "never". Saying the stronger thing would
             // be a lie the moment someone pressed 检查更新.
             '所有进度都存在你自己机器的本地文件里，不上传。插件不会自己联网——只有你在「公告」里点检查和更新时才会。',
+          ),
+        ),
+
+        // ── 点个 Star ──
+        //
+        // Last thing on the page, deliberately: someone who has read this far has
+        // seen the whole thing and knows what it is, which is exactly when a
+        // request like this is reasonable rather than pushy.
+        //
+        // An anchor, not a button with a click handler: it is a real link, so
+        // middle-click and "open in new tab" work, and the address is visible on
+        // hover. The reason is stated next to it instead of being assumed.
+        h(
+          'a',
+          {
+            href: REPO_URL,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            style: {
+              display: 'flex',
+              alignItems: 'center',
+              gap: '14px',
+              padding: '14px 16px',
+              borderRadius: 'var(--dsw-radius-lg)',
+              border: '1px solid var(--dsw-alias-border-l2)',
+              background: 'var(--dsw-alias-bg-layer-2)',
+              textDecoration: 'none',
+              color: 'inherit',
+            },
+            title: REPO_URL,
+          },
+          h(
+            'span',
+            {
+              style: {
+                flex: 'none',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                background: 'var(--dsw-alias-bg-base)',
+                border: '1px solid var(--dsw-alias-border-l2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+              'aria-hidden': true,
+            },
+            '★',
+          ),
+          h(
+            'span',
+            { style: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: '1 1 auto' } },
+            h('span', { style: { fontSize: '13.5px', fontWeight: 500 } }, '去 GitHub 点个 Star'),
+            h(
+              'span',
+              { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
+              '这就是我做下去的理由',
+            ),
+          ),
+          h(
+            'span',
+            { style: { ...styles.outboundLinkCompact, flex: 'none' }, 'aria-hidden': true },
+            '↗',
           ),
         ),
       )
@@ -7280,11 +7576,11 @@ window.__ModuleLoader__.load({
         let stopSettingsRow = null
         const syncSettingsRow = (visible) => {
           if (visible && stopSettingsRow === null) {
-            stopSettingsRow = ctx.slots.inject('settings.general.item', () =>
+            stopSettingsRow = ctx.slots.inject('settings.section', () =>
               ctx.slots.register(
-                { name: 'settings.general.item', id: 'checkin-claim', order: 40, label: '签到' },
+                { name: 'settings.section', id: 'dsh-moyu', order: 60, label: '摸鱼' },
                 () =>
-                  h(SettingsCheckinRow, {
+                  h(SettingsCheckinSection, {
                     onOpenPanel: () => {
                       // Leave settings first, then select the panel: selecting a
                       // panel behind the settings modal looks like nothing happened.

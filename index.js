@@ -22,7 +22,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -67,7 +67,7 @@ const HISTORY_LIMIT = 60
  * the two agree — because a version that only exists in one of them is exactly
  * the bug that makes an updater compare a stale value against a fresh one.
  */
-export const VERSION = '1.3.1'
+export const VERSION = '1.4.0'
 
 /**
  * Where updates are fetched from.
@@ -84,7 +84,19 @@ export const VERSION = '1.3.1'
  * dependency resolution — the whole plugin is two hand-written files, so
  * "update" means "replace those two files, if their hashes match".
  */
-const UPDATE_BASE = 'https://raw.githubusercontent.com/yizhiyangyangqwq/dsh-moyu/main/dist'
+/**
+ * Where the updater reads `manifest.json` and the files it names.
+ *
+ * The REPOSITORY ROOT, not a `dist/` folder. GitHub's web uploader flattens
+ * directories, so `dist/` — and everything else that lived in a subfolder — was
+ * published to the root. Rather than fight that, the root IS the release
+ * location: it holds manifest.json, index.js, client.js and package.json side by
+ * side, which is exactly the shape the updater expects.
+ *
+ * `tools/build-dist.mjs` still writes a local `dist/` folder for packaging; it
+ * is simply not the URL that gets served.
+ */
+const UPDATE_BASE = 'https://raw.githubusercontent.com/yizhiyangyangqwq/dsh-moyu/main'
 
 /** Files the updater is allowed to touch. Anything else is refused. */
 const UPDATE_FILES = ['index.js', 'client.js', 'package.json']
@@ -99,6 +111,19 @@ const UPDATE_FILES = ['index.js', 'client.js', 'package.json']
  * changed.
  */
 export const CHANGELOG = [
+  {
+    version: '1.4.0',
+    date: '2026-10-18',
+    title: '自动检查更新',
+    notes: [
+      '「允许联网检查更新」现在默认打开——但仍然只有你点按钮时才联网，不会自己发请求。',
+      '新增「自动检查更新」开关（默认关闭）：打开后每隔几小时自己检查一次。',
+      '自动检查发现新版本时会弹一条提示，可以关掉，不会反复出现同一个版本。',
+      'Windows 下还会额外发一条系统通知，插件在后台也能看到。',
+      '关掉「允许联网检查更新」会让自动检查一并失效——它的开关会自动置灰。',
+      '关于页底部加了「去 GitHub 点个 Star」，点开就是仓库。',
+    ],
+  },
   {
     version: '1.3.1',
     date: '2026-10-17',
@@ -2783,15 +2808,32 @@ export const SETTINGS_SCHEMA = [
     default: true,
   },
   // — updates —
-  // Network is OPT-IN and defaults OFF. The About page promises this plugin does
-  // not talk to the internet, and a default-on auto-check would quietly make
-  // that sentence false the moment the player opened the panel. Off by default
-  // means the promise stays literally true until the player decides otherwise.
+  // Two switches with different jobs, and the difference matters:
+  //
+  //   allowUpdateCheck  — "may this plugin ever touch the network?"
+  //   autoCheckUpdate   — "and should it do so on its own?"
+  //
+  // The first defaults ON now, but on its own it still means MANUAL: nothing is
+  // fetched until the player presses 检查更新. That keeps the About page's
+  // promise literally true — the plugin does not reach out by itself — while no
+  // longer making the player hunt for a switch before an obvious feature works.
+  //
+  // The second defaults OFF, because it is the one that actually phones home
+  // without being asked. Turning the first off makes the second meaningless, so
+  // the UI disables it and the host refuses the combination.
   {
     group: '更新',
     key: 'allowUpdateCheck',
     label: '允许联网检查更新',
-    desc: '关掉时插件完全不联网；打开后只有你点「检查更新」时才会发出一次请求。',
+    desc: '关掉时插件完全不联网。打开后也不会自己联网——只有你点「检查更新」时才发一次请求。',
+    kind: 'toggle',
+    default: true,
+  },
+  {
+    group: '更新',
+    key: 'autoCheckUpdate',
+    label: '自动检查更新',
+    desc: '每隔几小时自己检查一次，发现新版本会弹窗提示（需要允许联网检查更新）。',
     kind: 'toggle',
     default: false,
   },
@@ -2799,7 +2841,7 @@ export const SETTINGS_SCHEMA = [
     group: '更新',
     key: 'notifyNewVersion',
     label: '有新版本时提示',
-    desc: '打开面板时若发现已发布新版本，在「公告」标签上显示一个小圆点（需要允许检查更新）。',
+    desc: '在「公告」标签上显示一个小圆点（需要允许联网检查更新）。',
     kind: 'toggle',
     default: true,
   },
@@ -3050,8 +3092,12 @@ export function apply(ctx, config = {}) {
    * having to echo the whole object back — which would make a stale tab able to
    * silently revert a setting changed elsewhere.
    */
-  function updateSettings(patch, now = Date.now()) {
-    const before = { ...settings }
+  /** Whether a settings change touches the two switches that control the checker. */
+  function changedUpdaterKeys(before, after) {
+    return before.allowUpdateCheck !== after.allowUpdateCheck || before.autoCheckUpdate !== after.autoCheckUpdate
+  }
+
+  function updateSettings(patch, now = Date.now()) {    const before = { ...settings }
     // A PATCH, not a replace: an invalid value leaves its key untouched rather
     // than resetting it to the default.
     const next = applySettingsPatch(settings, patch)
@@ -3067,6 +3113,15 @@ export function apply(ctx, config = {}) {
       }
     }
     settings = next
+
+    /**
+     * Turning "自动检查更新" on must actually start the checker NOW.
+     *
+     * Otherwise the switch would only take effect after a restart — a setting
+     * that appears applied and does nothing is the kind of silent lie this
+     * plugin's tests exist to prevent.
+     */
+    if (changedUpdaterKeys(before, settings)) syncAutoCheck()
 
     // Report exactly which keys changed, so the UI can confirm what took effect
     // instead of guessing from the whole object.
@@ -7218,6 +7273,9 @@ export function apply(ctx, config = {}) {
       changelog: CHANGELOG.map((entry) => ({ ...entry, notes: [...entry.notes] })),
       allowUpdateCheck: settings.allowUpdateCheck === true,
       notifyNewVersion: settings.notifyNewVersion === true,
+      autoCheckUpdate: settings.autoCheckUpdate === true,
+      /** The last automatic check, so the panel can announce what it found. */
+      autoCheck: autoUpdateState,
       endpoint: UPDATE_BASE,
       /** The version the player has marked read, or null if never. */
       readUpTo: readsUpTo,
@@ -7368,6 +7426,135 @@ export function apply(ctx, config = {}) {
             : message
       return { ok: false, reason: 'network', message: `检查更新失败：${hint}`, current }
     }
+  }
+
+  /**
+   * The result of the most recent automatic check, for the panel to show.
+   *
+   * Kept separate from `checkForUpdate`'s return value: a manual check reports
+   * back to whoever pressed the button, while this is what the panel asks for on
+   * mount so a version found while nobody was looking still gets announced.
+   */
+  let autoUpdateState = null
+
+  /** How often the automatic check runs. */
+  const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+
+  let autoCheckTimer = null
+  let autoCheckKick = null
+  let lastAutoCheckAt = 0
+
+  /**
+   * Announce a discovered version to the desktop.
+   *
+   * On Windows this is a real toast through PowerShell's toast API; elsewhere it
+   * falls back to a console line, because there is no cross-platform notifier in
+   * the dependency-free part of Node and inventing one would mean bundling a
+   * native module into a plugin that is otherwise two text files.
+   *
+   * Failure is logged and swallowed. A desktop that refuses notifications must
+   * not make the update check itself fail — the in-app popup is the primary
+   * channel, this is the one you see when the app is behind another window.
+   */
+  function notifyDesktop(title, body) {
+    if (process.platform !== 'win32') {
+      logger.info?.(`[dsh-moyu] ${title}: ${body}`)
+      return
+    }
+    try {
+      // Single-quoted PowerShell string; the message is escaped for it. The
+      // script is passed as -Command so no temp files are involved.
+      const quote = (text) => `'${String(text).replace(/'/g, "''")}'`
+      const script = [
+        `$t = ${quote(title)}`,
+        `$b = ${quote(body)}`,
+        '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
+        '$tpl = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)',
+        "$n = $tpl.GetElementsByTagName('text')",
+        '$n.Item(0).AppendChild($tpl.CreateTextNode($t)) | Out-Null',
+        '$n.Item(1).AppendChild($tpl.CreateTextNode($b)) | Out-Null',
+        '$toast = [Windows.UI.Notifications.ToastNotification]::new($tpl)',
+        "try { [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('DSH').Show($toast) } catch { }",
+      ].join('; ')
+      const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script], {
+        windowsHide: true,
+        stdio: 'ignore',
+        detached: true,
+      })
+      child.unref()
+    } catch (error) {
+      logger.warn?.(`[dsh-moyu] 无法发送系统通知：${messageOf(error)}`)
+    }
+  }
+
+  /**
+   * One automatic check.
+   *
+   * Runs only when BOTH switches are on. The first switch alone means "manual
+   * only", so this must not be reachable from it — that distinction is the whole
+   * reason there are two switches.
+   */
+  async function runAutoCheck(now = Date.now()) {
+    if (settings.allowUpdateCheck !== true || settings.autoCheckUpdate !== true) return null
+    lastAutoCheckAt = now
+
+    const report = await checkForUpdate()
+    const found = report.ok === true && report.state === 'newer'
+    autoUpdateState = {
+      at: now,
+      checked: true,
+      found,
+      latest: report.ok === true ? report.latest : null,
+      current: report.ok === true ? report.current : (installedVersion() ?? VERSION),
+      /** Only set when a version was actually found, so the popup is dismissible-once. */
+      announceAt: found ? now : null,
+      error: report.ok === true ? null : report.message,
+    }
+
+    if (found) {
+      notifyDesktop('DSH 摸鱼插件有新版本', `${report.latest} 可以更新了（当前 ${report.current}）`)
+    } else {
+      logger.info?.(
+        `[dsh-moyu] 自动检查更新：${report.ok === true ? report.state : report.message}`,
+      )
+    }
+    return autoUpdateState
+  }
+
+  /** Start the automatic checker, if the player has asked for it. */
+  function syncAutoCheck() {
+    const wanted = settings.allowUpdateCheck === true && settings.autoCheckUpdate === true
+    if (!wanted) {
+      if (autoCheckKick !== null) {
+        clearTimeout(autoCheckKick)
+        autoCheckKick = null
+      }
+      if (autoCheckTimer !== null) {
+        clearInterval(autoCheckTimer)
+        autoCheckTimer = null
+      }
+      return
+    }
+    if (autoCheckTimer !== null || autoCheckKick !== null) return
+
+    // First run respects any check that already happened, so a restart loop
+    // cannot hammer the update source, then settles into the interval.
+    const since = Date.now() - lastAutoCheckAt
+    const delay = Math.max(5_000, Math.min(AUTO_CHECK_INTERVAL_MS, AUTO_CHECK_INTERVAL_MS - since))
+    autoCheckKick = setTimeout(() => {
+      autoCheckKick = null
+      void runAutoCheck()
+      autoCheckTimer = setInterval(() => void runAutoCheck(), AUTO_CHECK_INTERVAL_MS)
+      if (typeof autoCheckTimer?.unref === 'function') autoCheckTimer.unref()
+    }, delay)
+    if (typeof autoCheckKick?.unref === 'function') autoCheckKick.unref()
+  }
+
+  /** Mark the automatic popup as seen, so it does not come back. */
+  function dismissAutoUpdate() {
+    if (autoUpdateState === null) return { dismissed: false }
+    autoUpdateState = { ...autoUpdateState, announceAt: null }
+    return { dismissed: true }
   }
 
   /**
@@ -7654,6 +7841,22 @@ export function apply(ctx, config = {}) {
           const result = await checkForUpdate()
           return send(200, { ...snapshot(), result })
         }
+        if (method === 'POST' && routePath === '/update-auto-check') {
+          // Runs ONE automatic check on demand. Refused unless both switches are
+          // on, so pressing it cannot be used to bypass the manual-only posture
+          // the first switch promises on its own.
+          if (settings.allowUpdateCheck !== true || settings.autoCheckUpdate !== true) {
+            return send(400, { error: '自动检查更新没有打开。' })
+          }
+          const result = await runAutoCheck()
+          return send(200, { ...snapshot(), result })
+        }
+        if (method === 'POST' && routePath === '/update-dismiss') {
+          // Clearing the popup is a UI acknowledgement, not a game action: it
+          // answers 200 even when there was nothing to dismiss.
+          const result = dismissAutoUpdate()
+          return send(200, { ...snapshot(), result })
+        }
         if (method === 'POST' && routePath === '/update-apply') {
           const body = await readJson(req)
           // Two-step in one route, mirroring return/rebirth: the first call arms
@@ -7823,11 +8026,24 @@ export function apply(ctx, config = {}) {
   ctx.effect(
     () => () => {
       disposed = true
+      // Stop the automatic checker on teardown, or a reloaded plugin would leave
+      // an interval running that phones home forever.
+      if (autoCheckKick !== null) {
+        clearTimeout(autoCheckKick)
+        autoCheckKick = null
+      }
+      if (autoCheckTimer !== null) {
+        clearInterval(autoCheckTimer)
+        autoCheckTimer = null
+      }
       save.lastSeenAt = Date.now()
       persist()
     },
     'checkin: lifecycle',
   )
+
+  // Honour a saved "自动检查更新" from the previous session.
+  syncAutoCheck()
 }
 
 /** A short human duration, used in refusal messages. */
