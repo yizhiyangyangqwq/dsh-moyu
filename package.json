@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-moyu",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "description": "DSH 摸鱼插件｜每日签到与缓慢养成，给 agent 干活时的你一点消遣。基于 DeepSeek Harness (dsh)",

@@ -710,6 +710,109 @@ window.__ModuleLoader__.load({
        * response is a COMPLETE snapshot, so assigning it keeps the whole page
        * honest, and the caller reads the result for the thing that just happened.
        */
+      /**
+       * 挖矿 actions.
+       *
+       * All six follow the same contract as everything else in this hook: the
+       * response is a COMPLETE snapshot, so one assignment keeps the whole page
+       * honest, and the caller reads `result` for what just happened.
+       */
+      const mineSwing = React.useCallback(async () => {
+        setBusy(true)
+        try {
+          const next = await post('/mine-swing')
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          setError(message)
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
+      const mineDescend = React.useCallback(async (depth) => {
+        setBusy(true)
+        try {
+          const next = await post('/mine-depth', { depth })
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          setError(message)
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
+      const mineCollect = React.useCallback(async () => {
+        setBusy(true)
+        try {
+          const next = await post('/mine-collect')
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          setError(message)
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
+      const mineUpgrade = React.useCallback(async (upgrade) => {
+        setBusy(true)
+        try {
+          const next = await post('/mine-upgrade', { upgrade })
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          setError(message)
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
+      const mineHire = React.useCallback(async (miner) => {
+        setBusy(true)
+        try {
+          const next = await post('/mine-hire', { miner })
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          setError(message)
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
+      const mineCollectMiner = React.useCallback(async (miner) => {
+        setBusy(true)
+        try {
+          const next = await post('/mine-collect-miner', { miner })
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          setError(message)
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
       const fishCast = React.useCallback(async () => {
         setBusy(true)
         try {
@@ -904,6 +1007,12 @@ window.__ModuleLoader__.load({
         applyUpdate,
         markNoticeRead,
         dismissAutoUpdate,
+        mineSwing,
+        mineDescend,
+        mineCollect,
+        mineUpgrade,
+        mineHire,
+        mineCollectMiner,
         fishCast,
         fishStrike,
         buyRod,
@@ -1336,6 +1445,7 @@ window.__ModuleLoader__.load({
       claim: '◷',
       quest: '☑',
       farm: '❧',
+      mine: '⛏',
       trip: '✦',
       pack: '▤',
       alchemy: '⚗',
@@ -2574,6 +2684,12 @@ window.__ModuleLoader__.load({
         applyUpdate,
         markNoticeRead,
         dismissAutoUpdate,
+        mineSwing,
+        mineDescend,
+        mineCollect,
+        mineUpgrade,
+        mineHire,
+        mineCollectMiner,
         fishCast,
         fishStrike,
         buyRod,
@@ -3199,6 +3315,16 @@ window.__ModuleLoader__.load({
             // Badge the farm only when something is ripe: that is the "come look"
             // signal the whole feature is built around.
             { key: 'farm', label: '农场', badge: state.farmReady, show: data.settings.showFarm },
+            // Badge mining only when there is actually something to do with the
+            // stamina you have: a full bag waiting to be collected, or enough
+            // stamina for a swing. Otherwise the dot would be permanent noise.
+            {
+              key: 'mine',
+              label: '挖矿',
+              badge:
+                (state.mineBuffered ?? 0) > 0 || (state.mineStamina ?? 0) >= 1 ? 1 : 0,
+              show: data.settings.showMine,
+            },
             {
               key: 'trip',
               label: '出门',
@@ -4219,6 +4345,22 @@ window.__ModuleLoader__.load({
                 : null,
             ),
 
+        // ── mine tab ──
+        tab !== 'mine'
+          ? null
+          : h(MinePanel, {
+              data,
+              state,
+              busy,
+              onSwing: mineSwing,
+              onDescend: mineDescend,
+              onCollect: mineCollect,
+              onUpgrade: mineUpgrade,
+              onHire: mineHire,
+              onCollectMiner: mineCollectMiner,
+              currencySymbol,
+            }),
+
         // ── fishing tab ──
         tab !== 'fish'
           ? null
@@ -4864,6 +5006,436 @@ window.__ModuleLoader__.load({
      * every poll. The client never does clock arithmetic against `Date.now()`
      * across the wire — the host is the clock.
      */
+// ── the mine ─────────────────────────────────────────────────────────────
+
+    /**
+     * 挖矿 — the one system that spends a resource you have to WAIT for.
+     *
+     * Every other subsystem either accrues on its own (farm, offline) or costs
+     * currency. Mining costs 体力, which only comes back at one point per six
+     * minutes, so this panel's job is to make the cost visible before the click:
+     * the bar, the number, and the exact price on every button.
+     */
+    function MinePanel({
+      data,
+      state,
+      onSwing,
+      onDescend,
+      onCollect,
+      onUpgrade,
+      onHire,
+      onCollectMiner,
+      busy,
+      currencySymbol,
+    }) {
+      const mine = data.mine
+      const [last, setLast] = React.useState(null)
+
+      /**
+       * A snapshot from an older host has no `mine` at all.
+       *
+       * The browser half is re-read from disk on every page load while the host
+       * half only loads at DSH startup, so a plugin updated in place can briefly
+       * run new client code against an old snapshot. Saying so beats a blank tab.
+       */
+      if (mine === undefined || mine === null) {
+        return h(
+          'div',
+          { style: styles.codexNote },
+          '这个版本的宿主还没有挖矿数据 —— 重启 DSH 之后就能看到。',
+        )
+      }
+
+      const band = (mine.bands ?? []).find((b) => mine.depth >= b.from && mine.depth <= b.to)
+      const staminaPct =
+        mine.staminaCap <= 0 ? 0 : Math.round((mine.stamina / mine.staminaCap) * 100)
+      const bag = Object.entries(mine.bufferedSwing ?? {})
+      const noStamina = mine.stamina < 1
+
+      /**
+       * Ore ids → labels, from the shared item catalogue.
+       *
+       * Ores are ordinary `kind: 'sell'` items, so they are already in
+       * `data.items` — this panel does not need its own copy of the ore table,
+       * and reading the raw id ("iron_ore ×2") is not something to show a player.
+       */
+      const itemById = new Map((data.items ?? []).map((item) => [item.id, item]))
+      const oreLabel = (id) => itemById.get(id)?.label ?? id
+
+      /** Run an action and surface whatever it refuses with. */
+      const run = (fn) => async () => {
+        setLast(null)
+        try {
+          await fn()
+        } catch (err) {
+          setLast({ bad: true, text: err instanceof Error ? err.message : String(err) })
+        }
+      }
+
+      const bar = (pct, color) =>
+        h(
+          'div',
+          {
+            style: {
+              height: '8px',
+              borderRadius: '999px',
+              background: 'var(--dsw-alias-bg-layer-3)',
+              overflow: 'hidden',
+            },
+          },
+          h('div', {
+            style: {
+              width: `${Math.max(0, Math.min(100, pct))}%`,
+              height: '100%',
+              borderRadius: '999px',
+              background: color,
+              transition: 'width 200ms',
+            },
+          }),
+        )
+
+      const card = {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        padding: '14px 16px',
+        borderRadius: 'var(--dsw-radius-lg)',
+        border: '0.5px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+      }
+
+      const btn = (enabled, primary) => ({
+        flex: 'none',
+        height: '30px',
+        padding: '0 14px',
+        borderRadius: 'var(--dsw-radius-md)',
+        border: enabled && !primary ? '1px solid var(--dsw-alias-border-l2)' : 'none',
+        background: !enabled
+          ? 'transparent'
+          : primary
+            ? 'var(--dsw-alias-brand-primary)'
+            : 'transparent',
+        color: !enabled
+          ? 'var(--dsw-alias-label-tertiary)'
+          : primary
+            ? 'var(--dsw-alias-label-primary-inverted)'
+            : 'var(--dsw-alias-label-secondary)',
+        fontFamily: 'inherit',
+        fontSize: '12.5px',
+        cursor: enabled ? 'pointer' : 'not-allowed',
+        whiteSpace: 'nowrap',
+      })
+
+      return h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
+
+        // ── heading ──
+        h(
+          'div',
+          { style: styles.sectionTitle },
+          '挖矿',
+          h(
+            'span',
+            { style: styles.sectionHint },
+            `第 ${mine.depth} 层${band ? `（${band.label}）` : ''}　·　最深 ${mine.stats?.deepest ?? mine.depth} 层　·　挥镐 ${formatNumber(mine.stats?.swings ?? 0)} 次　·　出矿 ${formatNumber(mine.stats?.oresMined ?? 0)} 块`,
+          ),
+        ),
+
+        h(
+          'div',
+          { style: styles.codexNote },
+          '每挥一镐花 1 点体力，体力 6 分钟回 1 点。所以它是「想动手的时候有地方去」，不是无限刷。',
+        ),
+
+        // ── stamina ──
+        h(
+          'div',
+          { style: card },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' } },
+            h('div', { style: { fontSize: '14px', fontWeight: 500 } }, `体力 ${mine.stamina} / ${mine.staminaCap}`),
+            h(
+              'div',
+              { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
+              mine.staminaIn === null
+                ? '已经满了'
+                : `下一点还要 ${formatCountdown((mine.staminaIn ?? 0) * 1000)}`,
+            ),
+          ),
+          bar(staminaPct, 'var(--dsw-alias-state-success-primary)'),
+        ),
+
+        // ── the wall ──
+        h(
+          'div',
+          { style: card },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
+            mine.vein === null
+              ? h(
+                  'div',
+                  { style: { flex: '1 1 220px', fontSize: '13px', color: 'var(--dsw-alias-label-secondary)' } },
+                  '这一层的岩壁还是空的 —— 挥一镐看看能凿出什么。',
+                )
+              : h(
+                  'div',
+                  { style: { flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '6px' } },
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
+                    h(
+                      'span',
+                      { style: { fontSize: '17px', color: `var(${mine.vein.accent})` } },
+                      mine.vein.glyph,
+                    ),
+                    h('span', { style: { fontSize: '14px', fontWeight: 500 } }, mine.vein.label),
+                    h(
+                      'span',
+                      { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-quaternary)' } },
+                      `${mine.vein.mined} / ${mine.vein.total} 凿`,
+                    ),
+                  ),
+                  bar(
+                    mine.vein.percent,
+                    `var(${mine.vein.accent}, var(--dsw-alias-label-secondary))`,
+                  ),
+                ),
+            h(
+              'button',
+              {
+                type: 'button',
+                onClick: run(onSwing),
+                disabled: busy || noStamina,
+                style: btn(!busy && !noStamina, true),
+                title: noStamina ? '体力不够了' : '消耗 1 点体力',
+              },
+              noStamina ? '体力不够' : '挥一镐（-1 体力）',
+            ),
+          ),
+        ),
+
+        // ── the bag ──
+        bag.length === 0 && mine.bufferedTotal === 0
+          ? null
+          : h(
+              'div',
+              { style: card },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
+                h(
+                  'div',
+                  { style: { flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' } },
+                  h('div', { style: { fontSize: '14px', fontWeight: 500 } }, `矿袋里有 ${mine.bufferedTotal} 块`),
+                  h(
+                    'div',
+                    { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
+                    bag.map(([id, count]) => `${oreLabel(id)} ×${count}`).join('　·　'),
+                  ),
+                ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: run(onCollect),
+                    disabled: busy || mine.bufferedTotal === 0,
+                    style: btn(!busy && mine.bufferedTotal > 0, true),
+                  },
+                  '收进背包',
+                ),
+              ),
+            ),
+
+        // ── descend ──
+        h(
+          'div',
+          { style: card },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
+            h('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' } },
+              h('div', { style: { fontSize: '14px', fontWeight: 500 } }, `下潜到第 ${mine.depth} 层`),
+              h(
+                'div',
+                { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
+                `已解锁到第 ${mine.maxDepth} 层（矿洞共 ${mine.depthMax} 层）　·　向上免费，向下每层 1 点体力　·　换层会丢掉凿到一半的矿脉`,
+              ),
+            ),
+            h('button', {
+              type: 'button',
+              onClick: run(() => onDescend(mine.depth - 1)),
+              disabled: busy || mine.depth <= mine.minDepth,
+              style: btn(!busy && mine.depth > mine.minDepth, false),
+            }, '上一层'),
+            h('button', {
+              type: 'button',
+              onClick: run(() => onDescend(mine.depth + 1)),
+              disabled: busy || mine.depth >= mine.maxDepth || mine.stamina < 1,
+              style: btn(!busy && mine.depth < mine.maxDepth && mine.stamina >= 1, false),
+            }, '下一层'),
+            mine.maxDepth > mine.depth
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: run(() => onDescend(mine.maxDepth)),
+                    disabled: busy || mine.stamina < mine.descendAllCost,
+                    style: btn(!busy && mine.stamina >= mine.descendAllCost, false),
+                    title: `一路下到第 ${mine.maxDepth} 层，花 ${mine.descendAllCost} 点体力`,
+                  },
+                  `直达第 ${mine.maxDepth} 层（-${mine.descendAllCost}）`,
+                )
+              : null,
+          ),
+        ),
+
+        // ── upgrades ──
+        h(
+          'div',
+          { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+          h(
+            'div',
+            { style: { fontSize: '11px', letterSpacing: '.14em', color: 'var(--dsw-alias-label-quaternary)' } },
+            '矿洞升级',
+          ),
+          h(
+            'div',
+            { style: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' } },
+            (mine.upgradeList ?? []).map((entry) =>
+              h(
+                'div',
+                { key: entry.id, style: { ...card, gap: '8px' } },
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' } },
+                  h('span', { style: { fontSize: '13.5px', fontWeight: 500 } }, entry.label),
+                  h(
+                    'span',
+                    { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-quaternary)' } },
+                    `Lv.${entry.level} / ${entry.max}`,
+                  ),
+                ),
+                h(
+                  'div',
+                  { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)', lineHeight: '1.5' } },
+                  entry.desc,
+                ),
+                entry.maxed
+                  ? h('div', { style: { ...styles.rarityChip, alignSelf: 'flex-start', color: 'var(--dsw-alias-state-success-primary)' } }, '已满级')
+                  : h(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: run(() => onUpgrade(entry.id)),
+                        disabled: busy || !entry.affordable,
+                        style: { ...btn(!busy && entry.affordable, true), alignSelf: 'flex-start' },
+                      },
+                      `升级　${currencySymbol('gold')} ${formatNumber(entry.nextCost)}`,
+                    ),
+              ),
+            ),
+          ),
+        ),
+
+        // ── miners ──
+        (mine.miners ?? []).length === 0
+          ? null
+          : h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+              h(
+                'div',
+                { style: { fontSize: '11px', letterSpacing: '.14em', color: 'var(--dsw-alias-label-quaternary)' } },
+                '矿工',
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+                mine.miners.map((entry) =>
+                  h(
+                    'div',
+                    { key: entry.id, style: { ...card, gap: '8px' } },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
+                      h(
+                        'div',
+                        { style: { flex: '1 1 240px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' } },
+                        h(
+                          'div',
+                          { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
+                          h('span', { style: { fontSize: '13.5px', fontWeight: 500 } }, entry.label),
+                          h(
+                            'span',
+                            { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-quaternary)' } },
+                            `第 ${entry.depth} 层 · ${entry.perHour}/小时`,
+                          ),
+                          entry.active
+                            ? h('span', { style: styles.questReadyChip }, '干活中')
+                            : null,
+                        ),
+                        h(
+                          'div',
+                          { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)', lineHeight: '1.5' } },
+                          entry.active
+                            ? `攒了 ${entry.bufferedTotal} 块　·　收的时候结算工资 ${currencySymbol('gold')} ${formatNumber(entry.wagePerHour)}/小时${entry.full ? '　·　背包快满了' : ''}`
+                            : entry.desc,
+                        ),
+                      ),
+                      entry.active
+                        ? h(
+                            'button',
+                            {
+                              type: 'button',
+                              onClick: run(() => onCollectMiner(entry.id)),
+                              disabled: busy || entry.bufferedTotal === 0,
+                              style: btn(!busy && entry.bufferedTotal > 0, true),
+                            },
+                            '收取并付工资',
+                          )
+                        : h(
+                            'button',
+                            {
+                              type: 'button',
+                              onClick: run(() => onHire(entry.id)),
+                              disabled: busy || !entry.hireable,
+                              style: btn(!busy && entry.hireable, true),
+                            },
+                            `雇他　${currencySymbol('gold')} ${formatNumber(entry.hireCost)}`,
+                          ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+        // ── last outcome ──
+        last === null
+          ? null
+          : h(
+              'div',
+              {
+                style: {
+                  padding: '10px 14px',
+                  borderRadius: 'var(--dsw-radius-md)',
+                  fontSize: '12.5px',
+                  lineHeight: '1.6',
+                  background: last.bad
+                    ? 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent)'
+                    : 'var(--dsw-alias-bg-layer-2)',
+                  color: last.bad
+                    ? 'var(--dsw-alias-state-error-primary)'
+                    : 'var(--dsw-alias-label-secondary)',
+                },
+              },
+              last.text,
+            ),
+      )
+    }
+
     function FishingPanel({ data, state, onCast, onStrike, onBuyRod, onSetSpot, onSwitchRod, busy, currencySymbol }) {
       const fishing = data.fishing
       const rawCast = state.fishCast

@@ -67,7 +67,7 @@ const HISTORY_LIMIT = 60
  * the two agree — because a version that only exists in one of them is exactly
  * the bug that makes an updater compare a stale value against a fresh one.
  */
-export const VERSION = '1.4.0'
+export const VERSION = '1.5.0'
 
 /**
  * Where updates are fetched from.
@@ -111,6 +111,17 @@ const UPDATE_FILES = ['index.js', 'client.js', 'package.json']
  * changed.
  */
 export const CHANGELOG = [
+  {
+    version: '1.5.0',
+    date: '2026-10-18',
+    title: '挖矿终于有界面了',
+    notes: [
+      '补上挖矿的完整界面——之前宿主把 20 层矿洞、10 种矿石、4 名矿工全都实现了，但界面上根本没有入口，谁都点不到。',
+      '现在「挖矿」是独立标签页：挥镐、下潜、收矿、升级、雇矿工，都在一处。',
+      '体力条和下一点恢复时间都显示出来了，挥一镐花多少、下潜到第几层花多少，按钮上直接写清楚。',
+      '设置里新增「挖矿」开关，可以像其他系统一样单独隐藏这个标签页（体力照常恢复）。',
+    ],
+  },
   {
     version: '1.4.0',
     date: '2026-10-18',
@@ -2857,6 +2868,14 @@ export const SETTINGS_SCHEMA = [
   },
   {
     group: '显示的系统',
+    key: 'showMine',
+    label: '挖矿',
+    desc: '关掉只是隐藏这个标签页，体力照常恢复，矿工照常挖。',
+    kind: 'toggle',
+    default: true,
+  },
+  {
+    group: '显示的系统',
     key: 'showAlchemy',
     label: '炼金',
     desc: '隐藏炼金标签页。',
@@ -2943,6 +2962,7 @@ export const settingsSchema = SETTINGS_SCHEMA
  */
 export const SYSTEM_TOGGLES = [
   'showFarm',
+  'showMine',
   'showAlchemy',
   'showQuests',
   'showTrip',

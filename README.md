@@ -152,10 +152,10 @@ $node = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\nod
 & $node tools\test-settings.mjs      #  92 项 — 设置：夹紧、存留、生效、成就、入口成对
 & $node tools\test-update.mjs        #  54 项 — 更新引擎：版本比较、联网开关、校验、回滚、路径白名单
 & $node tools\test-dist-roundtrip.mjs # 17 项 — 用真实 dist/ 当更新源，验证发布侧与消费侧的约定
-& $node tools\test-client-render.mjs # 108 项 — 客户端真实渲染，15 个标签页 × 多种视图 × 入口锁定 × 头像内联
+& $node tools\test-client-render.mjs # 128 项 — 客户端真实渲染，16 个标签页 × 多种视图 × 入口锁定 × 头像内联
 ```
 
-**1093 项断言，13 个套件，全部通过。**
+**1117 项断言，13 个套件，全部通过。**
 
 发布新版本：
 
