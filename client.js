@@ -153,7 +153,7 @@ window.__ModuleLoader__.load({
      * One poller per mounted component. The host is the only clock that matters,
      * so a claim always re-reads state rather than patching it locally.
      */
-    function useCheckin(pollMs) {
+    function useCheckin(pollMs, heartbeat = true) {
       const [data, setData] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
@@ -182,11 +182,19 @@ window.__ModuleLoader__.load({
         }
       }, [load, pollMs])
 
-      // A local 1s heartbeat only redraws the countdowns; it never claims.
+      /**
+       * A local 1s heartbeat, but only where a countdown is actually drawn.
+       *
+       * It used to run on every tab, which meant the achievements wall — 213
+       * cards — was rebuilt once a second while you were scrolling it. That was
+       * the reported jank. The caller decides, because only the page knows which
+       * tab is showing.
+       */
       React.useEffect(() => {
+        if (!heartbeat) return undefined
         const timer = setInterval(() => setTick((value) => value + 1), 1000)
         return () => clearInterval(timer)
-      }, [])
+      }, [heartbeat])
 
       const claim = React.useCallback(
         async (period) => {
@@ -813,6 +821,23 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      /** Buy a snack from 小卖部. */
+      const buySnack = React.useCallback(async (snack) => {
+        setBusy(true)
+        try {
+          const next = await post('/snack', { snack })
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          setError(message)
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
       const fishCast = React.useCallback(async () => {
         setBusy(true)
         try {
@@ -1007,6 +1032,7 @@ window.__ModuleLoader__.load({
         applyUpdate,
         markNoticeRead,
         dismissAutoUpdate,
+        buySnack,
         mineSwing,
         mineDescend,
         mineCollect,
@@ -1112,7 +1138,7 @@ window.__ModuleLoader__.load({
               flexDirection: 'column',
               gap: '10px',
               padding: '14px 16px',
-              borderRadius: 'var(--dsw-radius-lg)',
+              borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
               border: '0.5px solid var(--dsw-alias-border-l2)',
               background: 'var(--dsw-alias-bg-layer-2)',
             },
@@ -1144,9 +1170,9 @@ window.__ModuleLoader__.load({
                   flex: 'none',
                   height: '30px',
                   padding: '0 14px',
-                  borderRadius: 'var(--dsw-radius-md)',
+                  borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
                   border: ready === 0 ? '1px solid var(--dsw-alias-border-l2)' : 'none',
-                  background: ready === 0 ? 'transparent' : 'var(--dsw-alias-brand-primary)',
+                  background: ready === 0 ? 'transparent' : 'var(--moyu-accent, var(--dsw-alias-brand-primary))',
                   color:
                     ready === 0
                       ? 'var(--dsw-alias-label-tertiary)'
@@ -1168,7 +1194,7 @@ window.__ModuleLoader__.load({
                   flex: 'none',
                   height: '30px',
                   padding: '0 12px',
-                  borderRadius: 'var(--dsw-radius-md)',
+                  borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
                   border: '1px solid var(--dsw-alias-border-l2)',
                   background: 'transparent',
                   color: 'var(--dsw-alias-label-secondary)',
@@ -1313,7 +1339,7 @@ window.__ModuleLoader__.load({
             height: '32px',
             padding: wide ? '0 8px' : '0',
             border: 'none',
-            borderRadius: 'var(--dsw-radius-md)',
+            borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
             background: active ? 'var(--dsw-alias-interactive-bg-hover)' : 'transparent',
             color: ready > 0 ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
             fontFamily: 'inherit',
@@ -1441,6 +1467,15 @@ window.__ModuleLoader__.load({
      * One lookup table rather than a component per tab: the icons carry no
      * meaning beyond "which tab is this", so a shape map is the whole job.
      */
+    /**
+     * Tabs whose contents do not change with the clock.
+     *
+     * The page heartbeat exists to move countdowns; on these tabs there is
+     * nothing to move, so it is skipped entirely. 成就 matters most: it renders
+     * one card per achievement (200+) and was being rebuilt every second.
+     */
+    const STATIC_TABS = new Set(['ach', 'about', 'settings', 'notice'])
+
     const TAB_GLYPHS = {
       claim: '◷',
       quest: '☑',
@@ -2081,7 +2116,7 @@ window.__ModuleLoader__.load({
                       alignItems: 'center',
                       justifyContent: 'center',
                       padding: 0,
-                      borderRadius: 'var(--dsw-radius-md)',
+                      borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
                       border: `2px solid ${
                         unlocked
                           ? `var(${tierColor})`
@@ -2459,7 +2494,12 @@ window.__ModuleLoader__.load({
                 // Pair rule, mirrored in the UI: turning the LAST open member of
                 // a `pair` group off would leave no way back (the host rejects
                 // it too, but a disabled control explains itself better than a
-                // thrown error). This is the entry points' badge/row pair.
+                // thrown error).
+                //
+                // Generic over group SIZE, because the entry points are THREE
+                // doors, not two: the footer badge, the sidebar row, and the
+                // 摸鱼 section inside DSH's own settings page. Closing any one
+                // or two is fine; the third stays locked.
                 const pairLocked =
                   entry.pair !== undefined &&
                   value === true &&
@@ -2483,13 +2523,81 @@ window.__ModuleLoader__.load({
                       ? h(
                           'div',
                           { style: { ...styles.shopDesc, color: 'var(--dsw-alias-state-warn-primary)' } },
-                          '另一处入口已经关了——这个也得留着，不然就没有地方能再打开它们。',
+                          // Wording covers the general case: with three doors, the
+                          // locked one is the last of its group, and "the others
+                          // are already off" is what makes it unclosable.
+                          '另外几处入口都关了——这一处得留着，不然就没有地方能再把它们打开。',
                         )
                       : null,
                   ),
 
-                  // The control, chosen by the schema's kind.
-                  entry.kind === 'toggle'
+                  /**
+                   * A fixed-choice setting.
+                   *
+                   * Rendered as a row of pill buttons, or as COLOUR SWATCHES when
+                   * the options carry a `swatch` — a palette is easier to pick from
+                   * as colours than as six identical labels, and it shows exactly
+                   * what you are about to get.
+                   */
+                  entry.kind === 'choice'
+                    ? h(
+                        'div',
+                        { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                        (entry.options ?? []).map((option) =>
+                          h(
+                            'button',
+                            {
+                              key: option.value,
+                              type: 'button',
+                              onClick: () =>
+                                onSave({ [entry.key]: option.value }).catch((err) => {
+                                  showToast(err instanceof Error ? err.message : String(err))
+                                }),
+                              disabled: busy,
+                              'aria-pressed': value === option.value,
+                              title: option.label,
+                              style: {
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                height: '26px',
+                                padding: option.swatch ? '0 9px 0 7px' : '0 11px',
+                                borderRadius: '999px',
+                                border:
+                                  value === option.value
+                                    ? '1px solid var(--moyu-accent, var(--moyu-accent, var(--dsw-alias-brand-primary)))'
+                                    : '1px solid var(--dsw-alias-border-l2)',
+                                background:
+                                  value === option.value
+                                    ? 'color-mix(in srgb, var(--moyu-accent, var(--moyu-accent, var(--dsw-alias-brand-primary))) 16%, transparent)'
+                                    : 'transparent',
+                                color:
+                                  value === option.value
+                                    ? 'var(--dsw-alias-label-primary)'
+                                    : 'var(--dsw-alias-label-tertiary)',
+                                fontFamily: 'inherit',
+                                fontSize: '12px',
+                                cursor: busy ? 'not-allowed' : 'pointer',
+                                opacity: busy ? 0.6 : 1,
+                              },
+                            },
+                            option.swatch
+                              ? h('span', {
+                                  style: {
+                                    width: '12px',
+                                    height: '12px',
+                                    borderRadius: '50%',
+                                    background: option.swatch,
+                                    flex: 'none',
+                                  },
+                                  'aria-hidden': true,
+                                })
+                              : null,
+                            option.label,
+                          ),
+                        ),
+                      )
+                    : entry.kind === 'toggle'
                     ? h(
                         'button',
                         {
@@ -2576,7 +2684,7 @@ window.__ModuleLoader__.load({
             alignItems: 'center',
             gap: '12px',
             padding: '11px 14px',
-            borderRadius: 'var(--dsw-radius-lg)',
+            borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
             border: '1px solid var(--dsw-alias-border-l2)',
             background: 'var(--dsw-alias-bg-layer-2)',
           },
@@ -2609,9 +2717,9 @@ window.__ModuleLoader__.load({
               flex: 'none',
               height: '28px',
               padding: '0 12px',
-              borderRadius: 'var(--dsw-radius-md)',
+              borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
               border: 'none',
-              background: 'var(--dsw-alias-brand-primary)',
+              background: 'var(--moyu-accent, var(--dsw-alias-brand-primary))',
               color: 'var(--dsw-alias-label-primary-inverted)',
               fontFamily: 'inherit',
               fontSize: '12px',
@@ -2631,7 +2739,7 @@ window.__ModuleLoader__.load({
               flex: 'none',
               width: '28px',
               height: '28px',
-              borderRadius: 'var(--dsw-radius-md)',
+              borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
               border: '1px solid var(--dsw-alias-border-l2)',
               background: 'transparent',
               color: 'var(--dsw-alias-label-tertiary)',
@@ -2651,6 +2759,13 @@ window.__ModuleLoader__.load({
     // ── the panel ────────────────────────────────────────────────────────────
 
     function CheckinPage() {
+      /**
+       * Declared BEFORE the data hook, because the hook needs to know whether this
+       * tab draws a countdown. 成就 / 关于 / 设置 / 公告 do not, so their 1s
+       * heartbeat is never installed — that is the scroll-jank fix.
+       */
+      const [tab, setTab] = React.useState('claim')
+
       const {
         data,
         error,
@@ -2684,6 +2799,7 @@ window.__ModuleLoader__.load({
         applyUpdate,
         markNoticeRead,
         dismissAutoUpdate,
+        buySnack,
         mineSwing,
         mineDescend,
         mineCollect,
@@ -2702,10 +2818,9 @@ window.__ModuleLoader__.load({
         collectMachine,
         reload,
         tick,
-      } = useCheckin(PANEL_POLL_MS)
+      } = useCheckin(PANEL_POLL_MS, !STATIC_TABS.has(tab))
       const [toast, setToast] = React.useState(null)
       const [showLocked, setShowLocked] = React.useState(false)
-      const [tab, setTab] = React.useState('claim')
       /** 'list' is the original flat wall; 'tree' is the pan-and-drag graph. */
       const [achView, setAchView] = React.useState('list')
       /** Which codex tab is showing inside 背包. */
@@ -2750,10 +2865,44 @@ window.__ModuleLoader__.load({
         [],
       )
 
+      /**
+       * The personalisation palette, resolved into CSS variables.
+       *
+       * `choice` values are stored as names, not hexes, so the palette lives here
+       * and the saved value stays readable ("gold" rather than "#e3b341"). Every
+       * setter below feeds a variable that the stylesheet already reads, which is
+       * why changing a colour needs no re-render of anything but this wrapper.
+       *
+       * Declared before the empty-state return because hooks must run in the same
+       * order on every render, including the one that shows the loading text.
+       */
+      const themeVars = React.useMemo(() => {
+        const chosen = data?.settings ?? {}
+        const ACCENTS = {
+          blue: '#4d6bfe',
+          green: '#3fb950',
+          gold: '#e3b341',
+          purple: '#a371f7',
+          cyan: '#39c5cf',
+          red: '#f85149',
+        }
+        const corner = chosen.cornerStyle ?? 'default'
+        const radiusLg = corner === 'soft' ? '16px' : corner === 'square' ? '4px' : '10px'
+        const radiusMd = corner === 'soft' ? '12px' : corner === 'square' ? '3px' : '8px'
+        const density = chosen.wallDensity ?? 'cozy'
+        const cardMin = density === 'dense' ? '150px' : density === 'compact' ? '190px' : '230px'
+        return {
+          '--moyu-accent': ACCENTS[chosen.accentColor] ?? ACCENTS.blue,
+          '--moyu-radius-lg': radiusLg,
+          '--moyu-radius-md': radiusMd,
+          '--moyu-card-min': cardMin,
+        }
+      }, [data?.settings?.accentColor, data?.settings?.cornerStyle, data?.settings?.wallDensity])
+
       if (data === null) {
         return h(
           'div',
-          { style: styles.page },
+          { style: { ...styles.page, ...themeVars } },
           h('div', { style: styles.empty }, error === null ? '正在读取存档…' : `读不到存档：${error}`),
         )
       }
@@ -2938,6 +3087,8 @@ window.__ModuleLoader__.load({
           const result = await use(item)
           if (result.detail.kind === 'supply') {
             showToast(`使用「${result.label}」，物资 +${result.detail.restored}（现在 ${result.detail.current}）`)
+          } else if (result.detail.kind === 'stamina') {
+            showToast(`使用「${result.label}」，体力 +${result.detail.restored}（现在 ${result.detail.current} / ${result.detail.cap}）`)
           } else {
             showToast(`使用「${result.label}」，${result.detail.buff.label}生效 ${formatHours(result.detail.buff.ms / 3_600_000)}`)
           }
@@ -3030,6 +3181,16 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** Buy one snack from 小卖部; it lands in the pack, not in your stomach. */
+      const onBuySnack = async (snack) => {
+        try {
+          const result = await buySnack(snack)
+          showToast(`买了「${result.label}」，已经放进背包`)
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : String(err))
+        }
+      }
+
       const onTendAll = async () => {
         try {
           const result = await tendAll()
@@ -3085,6 +3246,20 @@ window.__ModuleLoader__.load({
       const currencySymbol = (key) => {
         const found = data.currencies.find((entry) => entry.key === key)
         return found === undefined ? '•' : found.symbol
+      }
+
+      /**
+       * A currency bundle as one line: `●300 + ◆2`.
+       *
+       * Negative amounts are shown with a leading minus and the whole line keeps
+       * its sign visible, because the shop's net figure can legitimately be
+       * negative (a machine that owes more wage than it sold) and hiding that
+       * would misreport the payout.
+       */
+      const describeBundle = (bundle, symbol = currencySymbol) => {
+        const entries = Object.entries(bundle ?? {}).filter(([, amount]) => amount !== 0)
+        if (entries.length === 0) return '0'
+        return entries.map(([key, amount]) => `${symbol(key)}${formatNumber(amount)}`).join(' + ')
       }
 
       /** The display name of an item id, falling back to the raw id. */
@@ -3312,9 +3487,11 @@ window.__ModuleLoader__.load({
             // The quest tab badges unclaimed-but-complete quests: that is the one
             // signal worth interrupting for, because the reward is sitting there.
             { key: 'quest', label: '任务', badge: questsClaimable, show: data.settings.showQuests },
-            // Badge the farm only when something is ripe: that is the "come look"
-            // signal the whole feature is built around.
-            { key: 'farm', label: '农场', badge: state.farmReady, show: data.settings.showFarm },
+            // Badge the farm for EITHER reason to come look: something is ripe, or
+            // something is sick. Ailments only slow growth, so a neglected plot
+            // still finishes — which is precisely why the player forgets it, and
+            // why a silent debuff is the wrong default.
+            { key: 'farm', label: '农场', badge: Math.max(state.farmReady, state.farmAiling ?? 0), show: data.settings.showFarm },
             // Badge mining only when there is actually something to do with the
             // stamina you have: a full bag waiting to be collected, or enough
             // stamina for a swing. Otherwise the dot would be permanent noise.
@@ -4090,6 +4267,60 @@ window.__ModuleLoader__.load({
                 ),
               ),
 
+              /**
+               * The ailment reminder.
+               *
+               * A request from a player who kept forgetting the farm: a debuff only
+               * slows growth and never kills the crop, so nothing ever forces you
+               * to look. This names the affected plots and what is wrong with them,
+               * then points at the one button that fixes it.
+               */
+              (state.farmAiling ?? 0) === 0
+                ? null
+                : h(
+                    'div',
+                    {
+                      style: {
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        flexWrap: 'wrap',
+                        padding: '11px 14px',
+                        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
+                        border: '1px solid var(--dsw-alias-border-l2)',
+                        background: 'var(--dsw-alias-bg-layer-2)',
+                      },
+                    },
+                    h('span', { style: { flex: 'none', fontSize: '15px' }, 'aria-hidden': true }, '⚠'),
+                    h(
+                      'div',
+                      { style: { flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },
+                      h(
+                        'div',
+                        { style: { fontSize: '13px' } },
+                        `${state.farmAiling} 块地状态不好`,
+                      ),
+                      h(
+                        'div',
+                        { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
+                        `${(data.farm.plots ?? [])
+                          .filter((plot) => (plot.ailments ?? []).length > 0)
+                          .map((plot) => `第 ${plot.index + 1} 块：${plot.ailments.map((a) => a.label).join('、')}`)
+                          .join('　·　')}　—— 只是长得慢，不会死，但值得看一眼。`,
+                      ),
+                    ),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: onTendAll,
+                        disabled: busy,
+                        style: busy ? styles.buyButtonDisabled : styles.claimButton,
+                      },
+                      '一键照看',
+                    ),
+                  ),
+
               // Bulk actions first: the common visit is "collect and go".
               h(
                 'div',
@@ -4344,6 +4575,76 @@ window.__ModuleLoader__.load({
                   )
                 : null,
             ),
+
+              // ── 小卖部 ──
+              /**
+               * The tuck shop lives at the BOTTOM of 农场 on purpose.
+               *
+               * It is not a system of its own — it sells snacks that restore the
+               * two resources you have to wait for, and the farm is the page you
+               * open when you are waiting anyway. Putting it here means "while I
+               * am in the garden, I can grab something for the road."
+               */
+              h(
+                'div',
+                { style: styles.sectionTitle },
+                '小卖部',
+                h('span', { style: styles.sectionHint }, '买点喝的，带出门或者下矿'),
+              ),
+              h(
+                'div',
+                { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' } },
+                (data.snacks ?? []).map((snack) =>
+                  h(
+                    'div',
+                    {
+                      key: snack.id,
+                      style: {
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        padding: '13px 15px',
+                        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
+                        border: '0.5px solid var(--dsw-alias-border-l2)',
+                        background: 'var(--dsw-alias-bg-layer-2)',
+                      },
+                    },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
+                      h('span', { style: { fontSize: '17px', color: `var(${snack.accent})` }, 'aria-hidden': true }, snack.glyph),
+                      h('span', { style: { fontSize: '14px', fontWeight: 500 } }, snack.label),
+                    ),
+                    h(
+                      'div',
+                      { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)', lineHeight: '1.5' } },
+                      snack.desc,
+                    ),
+                    h(
+                      'div',
+                      { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-quaternary)' } },
+                      snack.kind === 'stamina' ? `体力 +${snack.amount}` : `物资 +${snack.amount}`,
+                    ),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        onClick: () => onBuySnack(snack.id),
+                        disabled: busy || !snack.affordable || !snack.packRoom,
+                        title: !snack.packRoom ? '背包满了' : !snack.affordable ? '钱不够' : '',
+                        style: busy || !snack.affordable || !snack.packRoom
+                          ? styles.buyButtonDisabled
+                          : styles.claimButton,
+                      },
+                      !snack.packRoom
+                        ? '背包满了'
+                        : `买一个　${Object.entries(snack.cost)
+                            .map(([k, v]) => `${currencySymbol(k)} ${formatNumber(v)}`)
+                            .join(' ')}`,
+                    ),
+                  ),
+                ),
+              ),
 
         // ── mine tab ──
         tab !== 'mine'
@@ -5099,7 +5400,7 @@ window.__ModuleLoader__.load({
         flexDirection: 'column',
         gap: '10px',
         padding: '14px 16px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l2)',
         background: 'var(--dsw-alias-bg-layer-2)',
       }
@@ -5108,12 +5409,12 @@ window.__ModuleLoader__.load({
         flex: 'none',
         height: '30px',
         padding: '0 14px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: enabled && !primary ? '1px solid var(--dsw-alias-border-l2)' : 'none',
         background: !enabled
           ? 'transparent'
           : primary
-            ? 'var(--dsw-alias-brand-primary)'
+            ? 'var(--moyu-accent, var(--dsw-alias-brand-primary))'
             : 'transparent',
         color: !enabled
           ? 'var(--dsw-alias-label-tertiary)'
@@ -5420,7 +5721,7 @@ window.__ModuleLoader__.load({
               {
                 style: {
                   padding: '10px 14px',
-                  borderRadius: 'var(--dsw-radius-md)',
+                  borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
                   fontSize: '12.5px',
                   lineHeight: '1.6',
                   background: last.bad
@@ -5461,10 +5762,19 @@ window.__ModuleLoader__.load({
       // A 100ms heartbeat drives the countdown; the phase below is recomputed from
       // elapsed time on every tick, never read off `cast.state`.
       const [, setTick] = React.useState(0)
+      /**
+       * 10Hz only while a line is actually out.
+       *
+       * The float animation and the shrinking window need the resolution; an idle
+       * fishing tab needs none of it, and 10 renders a second of a panel that has
+       * not changed is pure heat.
+       */
+      const castActive = rawCast !== null
       React.useEffect(() => {
+        if (!castActive) return undefined
         const timer = setInterval(() => setTick((n) => n + 1), 100)
         return () => clearInterval(timer)
-      }, [])
+      }, [castActive])
 
       const elapsed = Math.max(0, Date.now() - syncedAt)
 
@@ -5562,7 +5872,7 @@ window.__ModuleLoader__.load({
               gap: '10px',
               minHeight: '160px',
               padding: '20px',
-              borderRadius: 'var(--dsw-radius-lg)',
+              borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
               border: '0.5px solid var(--dsw-alias-border-l2)',
               background:
                 phase === 'biting'
@@ -5658,7 +5968,7 @@ window.__ModuleLoader__.load({
               {
                 style: {
                   padding: '10px 14px',
-                  borderRadius: 'var(--dsw-radius-md)',
+                  borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
                   fontSize: '12.5px',
                   border: '0.5px solid var(--dsw-alias-border-l2)',
                   color:
@@ -5848,7 +6158,7 @@ window.__ModuleLoader__.load({
                   flexDirection: 'column',
                   gap: '10px',
                   padding: '16px',
-                  borderRadius: 'var(--dsw-radius-lg)',
+                  borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
                   border: `1px solid ${armed === mode.id ? `var(${mode.accent})` : 'var(--dsw-alias-border-l2)'}`,
                   background: 'var(--dsw-alias-bg-layer-2)',
                 },
@@ -5906,6 +6216,19 @@ window.__ModuleLoader__.load({
       const [note, setNote] = React.useState(null)
       const automated = store.mode === 'auto'
 
+      /**
+       * A currency bundle as one line: `●300 + ◆2`.
+       *
+       * Local to this panel because the machine cards report a NET figure — takings
+       * minus wage — which can legitimately be negative; hiding the sign would
+       * misreport what collecting actually pays.
+       */
+      const describeBundle = (bundle) => {
+        const entries = Object.entries(bundle ?? {}).filter(([, amount]) => amount !== 0)
+        if (entries.length === 0) return '0'
+        return entries.map(([key, amount]) => `${currencySymbol(key)}${formatNumber(amount)}`).join(' + ')
+      }
+
       const act = (fn, success) => async () => {
         try {
           const result = await fn()
@@ -5952,7 +6275,7 @@ window.__ModuleLoader__.load({
               flexDirection: 'column',
               gap: '8px',
               padding: '12px 14px',
-              borderRadius: 'var(--dsw-radius-lg)',
+              borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
               border: '0.5px solid var(--dsw-alias-border-l2)',
               background: 'var(--dsw-alias-bg-layer-2)',
             },
@@ -6017,7 +6340,7 @@ window.__ModuleLoader__.load({
               {
                 style: {
                   padding: '8px 12px',
-                  borderRadius: 'var(--dsw-radius-md)',
+                  borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
                   fontSize: '12px',
                   border: '0.5px solid',
                   borderColor:
@@ -6144,7 +6467,7 @@ window.__ModuleLoader__.load({
                           ? h(
                               'span',
                               { style: { ...styles.rarityChip, color: 'var(--dsw-alias-state-success-primary)' } },
-                              `运转中　${machine.bufferedTotal} 份待收`,
+                              machine.starved ? '缺货，先补货' : `卖出 ${formatNumber(machine.soldTotal)} 份`,
                             )
                           : null,
                       ),
@@ -6152,7 +6475,7 @@ window.__ModuleLoader__.load({
                       h(
                         'div',
                         { style: { ...styles.shopDesc, fontFamily: 'var(--ds-font-family-code, monospace)', fontSize: '10.5px' } },
-                        `${machine.perHour} 份/小时　·　工资 ${Object.entries(machine.wagePerHour)
+                        `每小时卖 ${machine.perHour} 份　·　工资 ${Object.entries(machine.wagePerHour)
                           .map(([k, v]) => `${currencySymbol(k)}${v}`)
                           .join('+')}/小时`,
                       ),
@@ -6165,16 +6488,16 @@ window.__ModuleLoader__.load({
                             onClick: act(
                               () => onCollect(machine.id),
                               (r) =>
-                                `收了 ${Object.values(r.granted).reduce((a, b) => a + b, 0)} 份，付工资 ${Object.entries(
+                                `卖了 ${formatNumber(r.sold)} 份，净得 ${describeBundle(r.net, currencySymbol)}，工资 ${Object.entries(
                                   r.wage,
                                 )
                                   .map(([k, v]) => `${currencySymbol(k)}${v}`)
                                   .join(' ')}`,
                             ),
-                            disabled: busy || machine.bufferedTotal <= 0,
-                            style: busy || machine.bufferedTotal <= 0 ? styles.buyButtonDisabled : styles.claimButton,
+                            disabled: busy || machine.soldTotal <= 0,
+                            style: busy || machine.soldTotal <= 0 ? styles.buyButtonDisabled : styles.claimButton,
                           },
-                          machine.bufferedTotal > 0 ? `收 ${machine.bufferedTotal} 份` : '还没产出',
+                          machine.soldTotal > 0 ? `收钱 ${describeBundle(machine.net, currencySymbol)}` : '还没卖出去',
                         )
                       : h(
                           'button',
@@ -6322,7 +6645,7 @@ window.__ModuleLoader__.load({
               flexDirection: 'column',
               gap: '10px',
               padding: '14px 16px',
-              borderRadius: 'var(--dsw-radius-lg)',
+              borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
               background: 'var(--dsw-alias-bg-layer-2)',
               border: '1px solid var(--dsw-alias-border-l2)',
             },
@@ -6456,7 +6779,7 @@ window.__ModuleLoader__.load({
                   flexDirection: 'column',
                   gap: '6px',
                   padding: '12px 14px',
-                  borderRadius: 'var(--dsw-radius-lg)',
+                  borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
                   border: '1px solid var(--dsw-alias-border-l1)',
                   // The running version's own entry is tinted, so "what am I
                   // on" is answerable by eye without reading version numbers.
@@ -6593,7 +6916,7 @@ window.__ModuleLoader__.load({
               alignItems: 'center',
               gap: '12px',
               padding: '14px 16px',
-              borderRadius: 'var(--dsw-radius-lg)',
+              borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
               background: 'var(--dsw-alias-bg-layer-2)',
               border: '1px solid var(--dsw-alias-border-l2)',
             },
@@ -6654,7 +6977,7 @@ window.__ModuleLoader__.load({
               flexDirection: 'column',
               gap: '10px',
               padding: '16px 18px',
-              borderRadius: 'var(--dsw-radius-lg)',
+              borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
               background: 'var(--dsw-alias-bg-layer-2)',
               border: '1px solid var(--dsw-alias-border-l2)',
             },
@@ -6745,7 +7068,7 @@ window.__ModuleLoader__.load({
               alignItems: 'center',
               gap: '14px',
               padding: '14px 16px',
-              borderRadius: 'var(--dsw-radius-lg)',
+              borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
               border: '1px solid var(--dsw-alias-border-l2)',
               background: 'var(--dsw-alias-bg-layer-2)',
               textDecoration: 'none',
@@ -6863,7 +7186,7 @@ window.__ModuleLoader__.load({
       ghostButton: {
         height: '32px',
         padding: '0 12px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: '1px solid var(--dsw-alias-border-l2)',
         background: 'transparent',
         color: 'var(--dsw-alias-label-primary)',
@@ -6889,7 +7212,7 @@ window.__ModuleLoader__.load({
         flex: 'none',
         height: '28px',
         padding: '0 10px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: '1px solid var(--dsw-alias-border-l2)',
         background: 'transparent',
         color: 'var(--dsw-alias-label-secondary)',
@@ -6906,9 +7229,9 @@ window.__ModuleLoader__.load({
         justifyContent: 'center',
         height: '32px',
         padding: '0 16px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: 'none',
-        background: 'var(--dsw-alias-brand-primary)',
+        background: 'var(--moyu-accent, var(--dsw-alias-brand-primary))',
         color: 'var(--dsw-alias-label-primary-inverted)',
         fontFamily: 'inherit',
         fontSize: '13px',
@@ -6920,9 +7243,9 @@ window.__ModuleLoader__.load({
       primaryButton: {
         height: '32px',
         padding: '0 14px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: 'none',
-        background: 'var(--dsw-alias-brand-primary)',
+        background: 'var(--moyu-accent, var(--dsw-alias-brand-primary))',
         color: 'var(--dsw-alias-label-primary-inverted)',
         fontFamily: 'inherit',
         fontSize: '13px',
@@ -6932,7 +7255,7 @@ window.__ModuleLoader__.load({
       primaryButtonDisabled: {
         height: '32px',
         padding: '0 14px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: 'none',
         background: 'var(--dsw-alias-bg-layer-2)',
         color: 'var(--dsw-alias-label-quaternary)',
@@ -6942,7 +7265,7 @@ window.__ModuleLoader__.load({
       },
       card: {
         border: '0.5px solid var(--dsw-alias-settings-card-stroke)',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         background: 'var(--dsw-alias-settings-card-fill)',
         padding: '12px 16px',
       },
@@ -6983,7 +7306,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '10px',
         border: '0.5px solid var(--dsw-alias-settings-card-stroke)',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         background: 'var(--dsw-alias-settings-card-fill)',
         padding: '10px 12px',
       },
@@ -7023,7 +7346,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
       },
@@ -7032,7 +7355,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l3)',
         background: 'var(--dsw-alias-bg-layer-2)',
       },
@@ -7061,9 +7384,9 @@ window.__ModuleLoader__.load({
         flex: 'none',
         height: '28px',
         padding: '0 14px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: 'none',
-        background: 'var(--dsw-alias-brand-primary)',
+        background: 'var(--moyu-accent, var(--dsw-alias-brand-primary))',
         color: 'var(--dsw-alias-label-primary-inverted)',
         fontFamily: 'inherit',
         fontSize: '12px',
@@ -7074,7 +7397,7 @@ window.__ModuleLoader__.load({
         flex: 'none',
         height: '28px',
         padding: '0 14px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: 'none',
         background: 'var(--dsw-alias-bg-layer-3)',
         color: 'var(--dsw-alias-label-quaternary)',
@@ -7092,27 +7415,39 @@ window.__ModuleLoader__.load({
       },
       achGrid: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(var(--moyu-card-min, 230px), 1fr))',
         gap: '8px',
       },
+      /**
+       * Achievement cards opt out of rendering while off-screen.
+       *
+       * `contentVisibility: 'auto'` lets the browser skip layout, paint and hit
+       * testing for cards outside the viewport — the wall is 200+ of them, and
+       * scrolling it was the reported slowdown. `containIntrinsicSize` supplies
+       * the placeholder height so the scrollbar does not jump as they come in.
+       */
       achCard: {
         display: 'flex',
         alignItems: 'center',
         gap: '10px',
         padding: '9px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-settings-card-stroke)',
         background: 'var(--dsw-alias-settings-card-fill)',
+        contentVisibility: 'auto',
+        containIntrinsicSize: 'auto 38px',
       },
       achCardLocked: {
         display: 'flex',
         alignItems: 'center',
         gap: '10px',
         padding: '9px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
         opacity: 0.62,
+        contentVisibility: 'auto',
+        containIntrinsicSize: 'auto 38px',
       },
       achTier: { fontSize: '14px', flex: 'none', width: '16px', textAlign: 'center' },
       achBody: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' },
@@ -7153,7 +7488,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '4px',
         padding: '3px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         background: 'var(--dsw-alias-bg-layer-2)',
         alignSelf: 'flex-start',
         /**
@@ -7181,7 +7516,7 @@ window.__ModuleLoader__.load({
         height: '28px',
         padding: '0 14px',
         border: 'none',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         background: 'transparent',
         color: 'var(--dsw-alias-label-secondary)',
         fontFamily: 'inherit',
@@ -7205,7 +7540,7 @@ window.__ModuleLoader__.load({
         height: '28px',
         padding: '0 14px',
         border: 'none',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         background: 'var(--dsw-alias-bg-base)',
         color: 'var(--dsw-alias-label-primary)',
         fontFamily: 'inherit',
@@ -7235,7 +7570,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-state-success-primary)',
         background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 8%, transparent)',
       },
@@ -7267,7 +7602,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
       },
@@ -7293,9 +7628,9 @@ window.__ModuleLoader__.load({
         minWidth: '72px',
         height: '28px',
         padding: '0 12px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: 'none',
-        background: 'var(--dsw-alias-brand-primary)',
+        background: 'var(--moyu-accent, var(--dsw-alias-brand-primary))',
         color: 'var(--dsw-alias-label-primary-inverted)',
         fontFamily: 'inherit',
         fontSize: '12px',
@@ -7308,7 +7643,7 @@ window.__ModuleLoader__.load({
         minWidth: '72px',
         height: '28px',
         padding: '0 12px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: '0.5px solid var(--dsw-alias-border-l2)',
         background: 'transparent',
         color: 'var(--dsw-alias-label-quaternary)',
@@ -7343,7 +7678,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '6px',
         padding: '16px 12px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-settings-card-stroke)',
         background: 'var(--dsw-alias-settings-card-fill)',
         textAlign: 'center',
@@ -7403,7 +7738,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '12px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l2)',
         background: 'var(--dsw-alias-bg-layer-2)',
         color: 'var(--dsw-alias-label-secondary)',
@@ -7413,7 +7748,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '12px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-state-success-primary)',
         background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent)',
         color: 'var(--dsw-alias-state-success-primary)',
@@ -7436,7 +7771,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '10px',
         padding: '10px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l2)',
         background: 'var(--dsw-alias-bg-layer-2)',
         color: 'var(--dsw-alias-label-primary)',
@@ -7449,7 +7784,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '10px',
         padding: '10px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
         color: 'var(--dsw-alias-label-quaternary)',
@@ -7463,7 +7798,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '10px',
         padding: '10px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-state-error-primary)',
         background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent)',
         color: 'var(--dsw-alias-state-error-primary)',
@@ -7481,7 +7816,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
       },
@@ -7494,7 +7829,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-settings-card-stroke)',
         background: 'var(--dsw-alias-settings-card-fill)',
       },
@@ -7516,7 +7851,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '10px',
         padding: '8px 10px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-settings-card-stroke)',
         background: 'var(--dsw-alias-settings-card-fill)',
       },
@@ -7525,7 +7860,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '10px',
         padding: '8px 10px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
         opacity: 0.6,
@@ -7539,7 +7874,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '16px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
       },
@@ -7548,13 +7883,13 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '16px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l3)',
         background: 'var(--dsw-alias-bg-layer-2)',
       },
       settingMain: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
       settingControl: { display: 'flex', alignItems: 'center', gap: '10px', flex: 'none', width: '190px' },
-      slider: { flex: 1, minWidth: 0, accentColor: 'var(--dsw-alias-brand-primary)', cursor: 'pointer' },
+      slider: { flex: 1, minWidth: 0, accentColor: 'var(--moyu-accent, var(--dsw-alias-brand-primary))', cursor: 'pointer' },
       settingValue: {
         flex: 'none',
         minWidth: '46px',
@@ -7615,7 +7950,7 @@ window.__ModuleLoader__.load({
         flexDirection: 'column',
         gap: '5px',
         padding: '10px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'var(--dsw-alias-settings-card-fill)',
         minHeight: '132px',
@@ -7625,7 +7960,7 @@ window.__ModuleLoader__.load({
         flexDirection: 'column',
         gap: '5px',
         padding: '10px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-state-success-primary)',
         background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 9%, transparent)',
         minHeight: '132px',
@@ -7635,7 +7970,7 @@ window.__ModuleLoader__.load({
         flexDirection: 'column',
         gap: '5px',
         padding: '10px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px dashed var(--dsw-alias-border-l2)',
         background: 'transparent',
         minHeight: '132px',
@@ -7672,7 +8007,7 @@ window.__ModuleLoader__.load({
       plantButton: {
         marginTop: 'auto',
         height: '26px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: '0.5px solid var(--dsw-alias-border-l2)',
         background: 'transparent',
         color: 'var(--dsw-alias-label-secondary)',
@@ -7744,7 +8079,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
       },
@@ -7753,7 +8088,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-state-success-primary)',
         background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 8%, transparent)',
       },
@@ -7762,7 +8097,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
         opacity: 0.55,
@@ -7805,7 +8140,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
       },
@@ -7814,7 +8149,7 @@ window.__ModuleLoader__.load({
         alignItems: 'center',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l3)',
         background: 'var(--dsw-alias-bg-layer-2)',
       },
@@ -7830,7 +8165,7 @@ window.__ModuleLoader__.load({
         flexDirection: 'column',
         gap: '10px',
         padding: '14px 16px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
       },
@@ -7839,9 +8174,9 @@ window.__ModuleLoader__.load({
         flexDirection: 'column',
         gap: '10px',
         padding: '14px 16px',
-        borderRadius: 'var(--dsw-radius-lg)',
-        border: '0.5px solid var(--dsw-alias-brand-primary)',
-        background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, transparent)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
+        border: '0.5px solid var(--moyu-accent, var(--dsw-alias-brand-primary))',
+        background: 'color-mix(in srgb, var(--moyu-accent, var(--dsw-alias-brand-primary)) 6%, transparent)',
       },
       rebirthHead: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' },
       rebirthLevel: { fontSize: '16px', fontWeight: 600, fontVariantNumeric: 'tabular-nums' },
@@ -7861,7 +8196,7 @@ window.__ModuleLoader__.load({
         alignSelf: 'flex-start',
         height: '32px',
         padding: '0 16px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: 'none',
         background: 'var(--dsw-alias-state-error-primary)',
         color: 'var(--dsw-alias-label-primary-inverted)',
@@ -7878,7 +8213,7 @@ window.__ModuleLoader__.load({
         gap: '3px',
         marginLeft: 'auto',
         padding: '2px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         background: 'var(--dsw-alias-bg-layer-2)',
         flex: 'none',
       },
@@ -7941,7 +8276,7 @@ window.__ModuleLoader__.load({
         gap: '3px',
         marginLeft: 'auto',
         padding: '2px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         background: 'var(--dsw-alias-bg-layer-2)',
       },
       zoomButton: {
@@ -7984,7 +8319,7 @@ window.__ModuleLoader__.load({
         height: 'clamp(260px, 52vh, 460px)',
         minHeight: '220px',
         overflow: 'hidden',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l2)',
         // A faint dot grid, like the advancement screen's paper. Declared as
         // `backgroundImage` + `backgroundColor` (never the `background`
@@ -8005,7 +8340,7 @@ window.__ModuleLoader__.load({
         flexDirection: 'column',
         gap: '4px',
         padding: '10px 12px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l3)',
         // A solid layer, not the overlay token: the hover card floats over the
         // canvas and must be readable, not translucent.
@@ -8035,7 +8370,7 @@ window.__ModuleLoader__.load({
         alignItems: 'flex-start',
         gap: '12px',
         padding: '10px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l1)',
         background: 'transparent',
       },
@@ -8078,7 +8413,7 @@ window.__ModuleLoader__.load({
         transform: 'translateX(-50%)',
         maxWidth: 'min(520px, 80vw)',
         padding: '8px 14px',
-        borderRadius: 'var(--dsw-radius-lg)',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
         border: '0.5px solid var(--dsw-alias-border-l3)',
         background: 'var(--dsw-alias-bg-overlay)',
         color: 'var(--dsw-alias-label-primary)',
@@ -8088,7 +8423,7 @@ window.__ModuleLoader__.load({
       },
       errorBar: {
         padding: '8px 12px',
-        borderRadius: 'var(--dsw-radius-md)',
+        borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
         border: '0.5px solid var(--dsw-alias-state-error-primary)',
         color: 'var(--dsw-alias-state-error-primary)',
         fontSize: '12px',

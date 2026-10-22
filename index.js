@@ -67,7 +67,7 @@ const HISTORY_LIMIT = 60
  * the two agree — because a version that only exists in one of them is exactly
  * the bug that makes an updater compare a stale value against a fresh one.
  */
-export const VERSION = '1.5.0'
+export const VERSION = '1.6.0'
 
 /**
  * Where updates are fetched from.
@@ -111,6 +111,38 @@ const UPDATE_FILES = ['index.js', 'client.js', 'package.json']
  * changed.
  */
 export const CHANGELOG = [
+  {
+    version: '1.6.0',
+    date: '2026-10-23',
+    title: '外观设置与滚动优化',
+    notes: [
+      '设置里新增「外观」分组：主题色（六种）、圆角（默认/更圆/方正）、成就墙密度（宽松/紧凑/最密）。改完立刻生效，不用重启。',
+      '主题色会用到按钮、徽章和选中状态上——不只是换一个色块。',
+      '修了滚动卡顿：成就墙有两百多张卡，而页面每秒重绘一次。现在成就/关于/设置/公告这几个不需要倒计时的标签页不再跑那个心跳，成就卡也交给浏览器按需渲染（视口外的直接跳过）。',
+      '钓鱼页只在有鱼线的时候才跑 10Hz 刷新，空闲时不再空转。',
+    ],
+  },
+  {
+    version: '1.5.2',
+    date: '2026-10-22',
+    title: '玩家反馈的三处修正',
+    notes: [
+      '开店：机器现在真的帮你卖货架上的货了。之前它只「生产」货物堆进仓库，而自动化路线又不允许手动卖——那些货永远变不成钱。现在每一小时它卖出的份数直接从货架扣，收的时候结算「卖价 − 工资」，按钮上写的就是净收入。',
+      '货架空了机器就停摆，而且不计工资——没干活不该收钱。界面上会直说「缺货，先补货」，不再是默默不赚。',
+      '钓鱼：钓到鱼却提示「背包满了」的假警报修好了。原因是记录进包数量的函数没有返回值，导致判断永远是「没放进去」。鱼其实一直在包里。',
+      '农场：有病害的地现在会在标签上标数字，农场页顶部还有一条提醒，写明第几块地、什么毛病，并给一个「一键照看」。',
+    ],
+  },
+  {
+    version: '1.5.1',
+    date: '2026-10-22',
+    title: '三处入口都能关，至少留一个',
+    notes: [
+      '设置页里的「摸鱼」板块现在也算一处入口了——它本来就有「打开完整面板」，是一扇门不是捷径。',
+      '所以三处入口统一规则：关掉任意两处都行，关最后一个会被拒绝。',
+      '拒绝时会点名这三处，说清楚为什么不能全关。',
+    ],
+  },
   {
     version: '1.5.0',
     date: '2026-10-18',
@@ -1605,6 +1637,17 @@ export const CROPS = [
     glyph: '◉',
   },
   {
+    id: 'watermelon',
+    label: '西瓜',
+    desc: '一整个夏天都在地里躺着。切开的时候最热闹。',
+    seed: { gold: 120 },
+    needMs: 2 * 3_600_000,
+    yield: { item: 'watermelon', min: 1, max: 2 },
+    tier: 'uncommon',
+    accent: '--dsw-alias-state-success-primary',
+    glyph: '◐',
+  },
+  {
     id: 'grape',
     label: '葡萄',
     desc: '成串地长，收一次很值。',
@@ -1660,6 +1703,7 @@ export const FARM_PRODUCE = [
   { id: 'radish', label: '萝卜', desc: '自己地里拔的，带着土。', kind: 'sell', rarity: 'common', sellFor: { coin: 13 }, accent: '--dsw-alias-state-idle-primary', glyph: '❧' },
   { id: 'wheat', label: '小麦', desc: '饱满的一把，能磨面。', kind: 'sell', rarity: 'common', sellFor: { coin: 52 }, accent: '--dsw-alias-state-warn-primary', glyph: '⌇' },
   { id: 'pumpkin', label: '南瓜', desc: '沉甸甸的，一个能顶一顿。', kind: 'sell', rarity: 'uncommon', sellFor: { gold: 74 }, accent: '--dsw-alias-state-warn-primary', glyph: '◉' },
+  { id: 'watermelon', label: '西瓜', desc: '沙瓤的，切开一刀能分给一圈人。', kind: 'sell', rarity: 'uncommon', sellFor: { gold: 300 }, accent: '--dsw-alias-state-success-primary', glyph: '◐' },
   { id: 'grape', label: '葡萄', desc: '成串的，甜得发腻。', kind: 'sell', rarity: 'uncommon', sellFor: { gold: 235 }, accent: '--dsw-alias-link', glyph: '⁘' },
   { id: 'ginseng', label: '人参', desc: '须根完整，行家会出高价。', kind: 'sell', rarity: 'rare', sellFor: { diamond: 15 }, accent: '--dsw-alias-state-success-primary', glyph: '⑂' },
   { id: 'lotus', label: '灵莲', desc: '摘下来的时候还在发光。', kind: 'sell', rarity: 'legendary', sellFor: { diamond: 64, relic: 1 }, accent: '--dsw-alias-state-error-primary', glyph: '✿' },
@@ -1672,6 +1716,55 @@ export const FARM_PRODUCE = [
  * seller and the codex use. Keeping them distinct is what stops a harvested
  * 萝卜 from being rolled as dungeon loot.
  */
+/**
+ * 小卖部 — snacks bought with money and eaten for a resource.
+ *
+ * Deliberately NOT a second currency sink like 商店（升级） or 开店（经营）: these
+ * are the two resources that only come back with time — 体力 for mining and 物资
+ * for expeditions — sold for money instead. That makes them a way to convert
+ * money into TIME, which nothing else in the plugin offers.
+ *
+ * `kind: 'stamina'` is handled by `useItem` alongside the existing 'supply' and
+ * buff kinds, so these appear in 背包 and are used from there like any other item.
+ */
+export const SNACKS = [
+  {
+    id: 'cola',
+    label: '可乐',
+    desc: '冰的。一口气灌下去，人就精神了。',
+    cost: { coin: 260 },
+    rarity: 'common',
+    kind: 'stamina',
+    stamina: 4,
+    accent: '--dsw-alias-state-warn-primary',
+    glyph: '◧',
+  },
+  {
+    id: 'sprite',
+    label: '雪碧',
+    desc: '透心凉，气比可乐还足。',
+    cost: { coin: 520 },
+    rarity: 'common',
+    kind: 'stamina',
+    stamina: 8,
+    accent: '--dsw-alias-state-success-primary',
+    glyph: '◨',
+  },
+  {
+    id: 'icecream',
+    label: '雪糕',
+    desc: '天热的时候，一根能撑起半天。装进包里带出门最合适。',
+    cost: { gold: 26 },
+    rarity: 'uncommon',
+    kind: 'supply',
+    supply: 18,
+    accent: '--dsw-alias-link',
+    glyph: '◆',
+  },
+]
+
+const SNACK_BY_ID = new Map(SNACKS.map((snack) => [snack.id, snack]))
+
 export const ALL_ITEMS = [...ITEMS, ...FARM_PRODUCE]
 
 const ALL_ITEM_BY_ID = new Map(ALL_ITEMS.map((entry) => [entry.id, entry]))
@@ -2204,7 +2297,7 @@ export const FISH_ITEMS = FISH.map((entry) => ({
   glyph: entry.glyph,
 }))
 
-ALL_ITEMS.push(...ORES, ...FORAGE_EXTRA_ITEMS, ...FISH_ITEMS)
+ALL_ITEMS.push(...ORES, ...FORAGE_EXTRA_ITEMS, ...FISH_ITEMS, ...SNACKS)
 void PRODUCE_BY_ID
 rebuildAllItems()
 
@@ -2570,7 +2663,24 @@ function defaultSave() {
       modeSwitches: 0,
       reputation: 0,
       stock: Object.fromEntries(SHOP_PRODUCTS.map((product) => [product.id, 0])),
-      machines: Object.fromEntries(SHOP_MACHINES.map((machine) => [machine.id, { endsAt: 0, buffered: {} }])),
+      machines: Object.fromEntries(
+        SHOP_MACHINES.map((machine) => [
+          machine.id,
+          {
+            endsAt: 0,
+            /** Takings since the last collection, by CURRENCY (not by product). */
+            buffered: {},
+            /** Units sold since the last collection, by product. */
+            byProduct: {},
+            /** Hours the machine was on shift, and therefore owes a wage for. */
+            hours: 0,
+            /** Units sold since the last collection. */
+            soldTotal: 0,
+            /** Hours it stood idle because the shelf was empty (statistics only). */
+            idleHours: 0,
+          },
+        ]),
+      ),
       sales: 0,
       revenue: { coin: 0, gold: 0 },
       manualSales: 0,
@@ -2785,18 +2895,73 @@ export const SETTINGS_SCHEMA = [
     kind: 'toggle',
     default: false,
   },
+  /**
+   * — 外观 —
+   *
+   * Personalisation that is purely cosmetic: none of these touch the economy, so
+   * they are safe to change at any time and carry no achievements.
+   *
+   * `choice` rather than free-form colour input on purpose. A plugin with no
+   * colour picker still has to look deliberate in every combination the user
+   * lands on, and a palette of six tested accents does that; an arbitrary hex
+   * would let someone pick a colour that disappears into the panel background.
+   */
+  {
+    group: '外观',
+    key: 'accentColor',
+    label: '主题色',
+    desc: '按钮、徽章和选中状态的颜色。',
+    kind: 'choice',
+    default: 'blue',
+    options: [
+      { value: 'blue', label: '蓝', swatch: '#4d6bfe' },
+      { value: 'green', label: '绿', swatch: '#3fb950' },
+      { value: 'gold', label: '金', swatch: '#e3b341' },
+      { value: 'purple', label: '紫', swatch: '#a371f7' },
+      { value: 'cyan', label: '青', swatch: '#39c5cf' },
+      { value: 'red', label: '红', swatch: '#f85149' },
+    ],
+  },
+  {
+    group: '外观',
+    key: 'cornerStyle',
+    label: '圆角',
+    desc: '卡片和按钮的边角圆润程度。',
+    kind: 'choice',
+    default: 'default',
+    options: [
+      { value: 'default', label: '默认' },
+      { value: 'soft', label: '更圆' },
+      { value: 'square', label: '方正' },
+    ],
+  },
+  {
+    group: '外观',
+    key: 'wallDensity',
+    label: '成就墙密度',
+    desc: '每张成就卡的最小宽度——越小一屏放得越多。',
+    kind: 'choice',
+    default: 'cozy',
+    options: [
+      { value: 'cozy', label: '宽松' },
+      { value: 'compact', label: '紧凑' },
+      { value: 'dense', label: '最密' },
+    ],
+  },
+
   // — entry points —
   // The plugin shows up in THREE places: the badge above the user's name at the
-  // sidebar foot, the 签到 row in the panel list, and a sign-in row inside DSH's
-  // own 设置 page. The first two are paired (never both off — an entry you
-  // cannot open is an entry that no longer exists); the settings row is NOT part
-  // of that pair, because turning it off leaves both other doors intact.
+  // sidebar foot, the 签到 row in the panel list, and the 摸鱼 section inside
+  // DSH's own 设置 page. All three are DOORS — the settings section can open the
+  // full panel, so it is a way in rather than a shortcut around one — and all
+  // three are in the same pair group: closing any two is fine, closing all three
+  // is refused, because then nothing on screen can bring the plugin back.
   // `pair` is the shared group id the rule and the UI both read.
   {
     group: '界面',
     key: 'showFooterBadge',
     label: '左下角签到徽章',
-    desc: '用户名字上方那个带可领数量的徽章。关掉后仍可从面板列表进入。',
+    desc: '用户名字上方那个带可领数量的徽章。关掉后仍可从另外两处进入。',
     kind: 'toggle',
     default: true,
     pair: 'entryPoints',
@@ -2805,7 +2970,7 @@ export const SETTINGS_SCHEMA = [
     group: '界面',
     key: 'showPanelEntry',
     label: '侧边栏签到入口',
-    desc: '面板列表里的「签到」那一行。关掉后仍可从左下角徽章进入。',
+    desc: '面板列表里的「签到」那一行。关掉后仍可从另外两处进入。',
     kind: 'toggle',
     default: true,
     pair: 'entryPoints',
@@ -2814,9 +2979,15 @@ export const SETTINGS_SCHEMA = [
     group: '界面',
     key: 'showSettingsRow',
     label: '设置页里的签到',
-    desc: '在 DSH 设置页加一行，可以直接领签到、看可领数量，不用打开插件面板。',
+    desc: '在 DSH 设置页里加一个「摸鱼」板块，可以直接领签到、也能打开完整面板。关掉后仍可从另外两处进入。',
     kind: 'toggle',
     default: true,
+    // In the pair since 1.5.1: this section carries an 打开完整面板 button, so
+    // it is a real way INTO the plugin, not merely a shortcut past it. When it
+    // was claim-only it sat outside the group on purpose; now that it opens the
+    // panel, closing all three would strand the player exactly as closing the
+    // two sidebar doors would.
+    pair: 'entryPoints',
   },
   // — updates —
   // Two switches with different jobs, and the difference matters:
@@ -2929,12 +3100,16 @@ const SETTINGS_BY_KEY = new Map(SETTINGS_SCHEMA.map((entry) => [entry.key, entry
 /**
  * "At least one must stay on" groups, read off the schema's `pair` tags.
  *
- * The entry points (footer badge / panel row) are the two doors into the whole
- * game: a player who closes both can never get back in to reopen one — the
- * settings page itself lives behind those doors. So the pair is a hard
- * invariant, enforced in three places: the UI disables the last open toggle,
- * `updateSettings` rejects a patch that would close both, and `normalizeSettings`
- * repairs a hand-edited file that already has both closed.
+ * The entry points (footer badge / panel row / settings section) are the three
+ * doors into the whole game: a player who closes all of them can never get back
+ * in to reopen one — the plugin's own settings page lives behind those doors. So
+ * the pair is a hard invariant, enforced in three places: the UI disables the
+ * last open toggle, `updateSettings` rejects a patch that would close all of
+ * them, and `normalizeSettings` repairs a hand-edited file that already has.
+ *
+ * The group is plural-agnostic: it holds however many keys carry the tag, and
+ * the rule is "not all off" rather than "not both off". Adding a fourth entry
+ * needs no change here.
  */
 const PAIR_GROUPS = new Map()
 for (const entry of SETTINGS_SCHEMA) {
@@ -2987,6 +3162,17 @@ export const DEFAULT_SETTINGS = Object.fromEntries(
 function coerceSetting(entry, value) {
   if (value === undefined || value === null) return undefined
   if (entry.kind === 'toggle') return typeof value === 'boolean' ? value : undefined
+  /**
+   * A fixed set of named choices, validated against the schema.
+   *
+   * An unknown value is REJECTED (undefined) rather than snapped to the first
+   * option: the caller then falls back to the default. Snapping would turn a typo
+   * in a hand-edited file into a silent, arbitrary choice.
+   */
+  if (entry.kind === 'choice') {
+    if (typeof value !== 'string') return undefined
+    return entry.options.some((option) => option.value === value) ? value : undefined
+  }
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return undefined
   return Math.min(entry.max, Math.max(entry.min, parsed))
@@ -3117,19 +3303,29 @@ export function apply(ctx, config = {}) {
     return before.allowUpdateCheck !== after.allowUpdateCheck || before.autoCheckUpdate !== after.autoCheckUpdate
   }
 
-  function updateSettings(patch, now = Date.now()) {    const before = { ...settings }
+  function updateSettings(patch, now = Date.now()) {
+    const before = { ...settings }
     // A PATCH, not a replace: an invalid value leaves its key untouched rather
     // than resetting it to the default.
     const next = applySettingsPatch(settings, patch)
-    // A patch that would close an entire "at least one" pair is REJECTED, not
+    // A patch that would close an entire "at least one" group is REJECTED, not
     // repaired: the UI disables the last open toggle already, so reaching here
     // means a stale tab or a hand-made request, and silently rewriting it would
-    // honour an action the player can never see undone. The error names both
-    // doors so the message is actionable wherever it surfaces.
+    // honour an action the player can never see undone. The error names every
+    // door in the group so the message is actionable wherever it surfaces.
+    //
+    // Written for a LIST rather than a pair: the entry-point group has three
+    // members, and the wording (and the count) is derived from the group itself.
     for (const keys of PAIR_GROUPS.values()) {
       if (keys.every((key) => next[key] === false)) {
-        const labels = keys.map((key) => `「${SETTINGS_BY_KEY.get(key).label}」`).join('和')
-        throw new Error(`${labels}不能同时关闭——两处入口都没了的话，就再也没有地方能把它们打开。至少留一处显示。`)
+        const names = keys.map((key) => `「${SETTINGS_BY_KEY.get(key).label}」`)
+        const joined =
+          names.length <= 1
+            ? (names[0] ?? '')
+            : `${names.slice(0, -1).join('、')}和${names[names.length - 1]}`
+        throw new Error(
+          `${joined}不能同时关闭——${keys.length} 处入口都没了的话，就再也没有地方能把它们打开。至少留一处显示。`,
+        )
       }
     }
     settings = next
@@ -3657,16 +3853,67 @@ export function apply(ctx, config = {}) {
     const shopMachines = {}
     for (const machine of SHOP_MACHINES) {
       const source = rawShop.machines?.[machine.id]
+
+      /**
+       * Machine buffers changed MEANING in 1.5.2.
+       *
+       * They used to hold product counts ("8 份茶") that were dumped into stock on
+       * collection. They now hold money, because a machine sells from the shelf
+       * instead of producing goods nobody could sell.
+       *
+       * A save from before that change is migrated here, not discarded: each
+       * buffered unit is credited at its CURRENT sale price, so an old pending
+       * buffer still pays out what it was worth.
+       */
       const buffered = {}
-      if (source !== undefined && source !== null && typeof source.buffered === 'object' && source.buffered !== null) {
-        for (const [id, count] of Object.entries(source.buffered)) {
-          const amount = Math.max(0, Math.floor(num(count, 0)))
-          if (amount > 0 && SHOP_PRODUCT_BY_ID.has(id)) buffered[id] = amount
+      const rawBuffer =
+        source !== undefined && source !== null && typeof source.buffered === 'object' && source.buffered !== null
+          ? source.buffered
+          : {}
+      for (const [key, value] of Object.entries(rawBuffer)) {
+        const amount = Math.max(0, Math.floor(num(value, 0)))
+        if (amount <= 0) continue
+        if (CURRENCY_KEYS.includes(key)) {
+          // Already the new shape.
+          buffered[key] = amount
+        } else if (SHOP_PRODUCT_BY_ID.has(key)) {
+          /**
+           * Legacy: a product COUNT from before machines sold from the shelf.
+           *
+           * Converted at the product's BASE price, not `salePrice()` — that helper
+           * reads `save.shop.mode`, and this runs while `save` is still being
+           * constructed, so calling it here throws "Cannot access 'save' before
+           * initialization". Base price is also the honest choice for a migration:
+           * the old buffer was earned under whatever mode was active then, which
+           * this function cannot know.
+           */
+          const product = SHOP_PRODUCT_BY_ID.get(key)
+          for (const [cur, per] of Object.entries(product.price)) {
+            buffered[cur] = (buffered[cur] ?? 0) + per * amount
+          }
         }
       }
+
+      const byProduct = {}
+      if (source?.byProduct !== null && typeof source?.byProduct === 'object') {
+        for (const [id, count] of Object.entries(source.byProduct)) {
+          const amount = Math.max(0, Math.floor(num(count, 0)))
+          if (amount > 0 && SHOP_PRODUCT_BY_ID.has(id)) byProduct[id] = amount
+        }
+      }
+
+      const soldTotal = Math.max(0, Math.floor(num(source?.soldTotal, 0)))
+      const hours = Math.max(0, Math.floor(num(source?.hours, 0)))
+
       shopMachines[machine.id] = {
         endsAt: Math.max(0, Math.round(num(source?.endsAt, 0))),
         buffered,
+        byProduct,
+        // A pending buffer with no recorded hours still owes a wage for the units
+        // it sold; derive the hours from the count rather than billing zero.
+        hours: hours > 0 ? hours : Math.min(24 * 30, Math.ceil(soldTotal / Math.max(1, machine.perHour))),
+        soldTotal,
+        idleHours: Math.max(0, Math.floor(num(source?.idleHours, 0))),
       }
     }
     const shopByProduct = {}
@@ -4049,15 +4296,30 @@ export function apply(ctx, config = {}) {
     if (row === undefined) save.pack.push({ item: itemId, count })
     else row.count += count
 
-    if (!wild) return
-    save.expedition.found[itemId] = (save.expedition.found[itemId] ?? 0) + count
-    const item = ALL_ITEM_BY_ID.get(itemId)
-    if (item !== undefined) {
-      const current = save.expedition.bestTier
-      if (current === null || RARITY_ORDER.indexOf(item.rarity) > RARITY_ORDER.indexOf(current)) {
-        save.expedition.bestTier = item.rarity
+    if (wild) {
+      save.expedition.found[itemId] = (save.expedition.found[itemId] ?? 0) + count
+      const item = ALL_ITEM_BY_ID.get(itemId)
+      if (item !== undefined) {
+        const current = save.expedition.bestTier
+        if (current === null || RARITY_ORDER.indexOf(item.rarity) > RARITY_ORDER.indexOf(current)) {
+          save.expedition.bestTier = item.rarity
+        }
       }
     }
+
+    /**
+     * How many units actually went in.
+     *
+     * Returned because callers report it to the player, and it used to return
+     * `undefined` — which made the fishing panel's `stored > 0` test always false
+     * and printed 「背包满了，只能放它走」 on EVERY catch, even when the fish had
+     * gone straight into an empty pack.
+     *
+     * Adding here is unconditional: the pack has no per-item cap, and callers
+     * that need a capacity check do it themselves before calling. So anything
+     * that reaches this line really was stored.
+     */
+    return count
   }
 
   /**
@@ -4526,6 +4788,36 @@ export function apply(ctx, config = {}) {
    * consume one unit, and neither is sellable — that split is what keeps the
    * three item kinds from being interchangeable.
    */
+  /**
+   * Buy one snack from 小卖部.
+   *
+   * The item lands in the PACK rather than being consumed on the spot: it is an
+   * item like any other, so it can be carried on an expedition and eaten when it
+   * is needed. Buying-and-immediately-using would make 雪糕 useless for the one
+   * thing it is good at.
+   */
+  function buySnack(snackId, now = Date.now()) {
+    const snack = SNACK_BY_ID.get(snackId)
+    if (snack === undefined) throw new Error(`小卖部没有这个：${snackId}`)
+    const mods = modifiers()
+    if (packUsed() >= mods.packSize) throw new Error('背包满了，先卖掉或者用掉点东西。')
+    if (!canAfford(snack.cost)) throw new Error(`买不起「${snack.label}」：${describeShortfall(snack.cost)}`)
+
+    for (const [key, amount] of Object.entries(snack.cost)) save.currencies[key] -= amount
+    recordSpend(snack.cost, now)
+    addToPack(snack.id, 1)
+
+    claimSeq += 1
+    pushHistory({ id: claimSeq, at: now, kind: 'snack', label: snack.label, paid: snack.cost })
+    const unlocked = reconcileAchievements(now)
+    for (const entry of unlocked) {
+      claimSeq += 1
+      pushHistory({ id: claimSeq, at: now, kind: 'achievement', achievement: entry.id, label: entry.label })
+    }
+    persist()
+    return { snack: snack.id, label: snack.label, paid: snack.cost, unlocked }
+  }
+
   function useItem(itemId, now = Date.now()) {
     const item = ALL_ITEM_BY_ID.get(itemId)
     if (item === undefined) throw new Error(`没有这个物品：${itemId}`)
@@ -4545,6 +4837,23 @@ export function apply(ctx, config = {}) {
       const before = save.supplies.current
       save.supplies.current = Math.min(mods.supplyCap, save.supplies.current + item.supply)
       detail = { kind: 'supply', restored: save.supplies.current - before, current: save.supplies.current }
+    } else if (item.kind === 'stamina') {
+      /**
+       * 体力类零食（小卖部）。
+       *
+       * This is the one way to buy TIME in the plugin: every other source of
+       * stamina is a six-minute wait, and the shop only sells permanent upgrades.
+       * Clamped to the cap like everything else, so a stack of cola cannot be
+       * hoarded into an unbounded pool.
+       */
+      regenStamina(now)
+      const cap = mineMods().staminaCap
+      const before = save.mine.stamina
+      save.mine.stamina = Math.min(cap, save.mine.stamina + item.stamina)
+      // Restart the regen clock if it was already ticking, so the drink does not
+      // silently eat a point that was about to arrive.
+      if (save.mine.staminaAt === 0) save.mine.staminaAt = now
+      detail = { kind: 'stamina', restored: save.mine.stamina - before, current: save.mine.stamina, cap }
     } else {
       // Re-using the same buff refreshes it rather than stacking, so the
       // duration is predictable and cannot be farmed into a permanent state.
@@ -5811,6 +6120,21 @@ export function apply(ctx, config = {}) {
    * month away cannot overflow the display. A partial hour is not banked — that
    * is why the panel says 整小时结算.
    */
+  /**
+   * Bring every owned machine up to date.
+   *
+   * A machine SELLS FROM THE SHELF. It used to "produce" goods into a buffer
+   * that then went straight into stock — and because the automated route refuses
+   * manual selling, that stock could never be converted back into money. Auto was
+   * a pure loss: you paid a wage and received a pile of unsellable inventory.
+   *
+   * Now one hour of machine time sells up to `perHour` units off the shelf,
+   * cheapest unlocked product first, and banks the revenue. The player's loop is
+   * the obvious one: 补货 → 机器卖 → 收钱 − 工资.
+   *
+   * A machine with nothing to sell IDLES: no revenue and, crucially, no wage.
+   * Charging a wage for an hour it could not work would be a charge for nothing.
+   */
   function accrueMachines(now = Date.now()) {
     let changed = false
     for (const machine of SHOP_MACHINES) {
@@ -5819,28 +6143,47 @@ export function apply(ctx, config = {}) {
       const elapsed = now - owned.endsAt
       if (elapsed < 3_600_000) continue
       const hours = Math.floor(elapsed / 3_600_000)
-      // The cheapest unlocked product is what a generic machine makes, which
-      // keeps machine income independent of what happens to be in stock.
-      const product = SHOP_PRODUCTS.filter((entry) => productUnlocked(entry))[0] ?? SHOP_PRODUCTS[0]
-      const produced = Math.floor(hours * machine.perHour)
-      const already = Object.values(owned.buffered).reduce((sum, n) => sum + n, 0)
-      const room = Math.max(0, 200 - already)
-      const gain = Math.min(produced, room)
-      if (gain > 0) {
-        owned.buffered[product.id] = (owned.buffered[product.id] ?? 0) + gain
-        changed = true
+
+      let capacity = hours * machine.perHour
+      let sold = 0
+      for (const product of SHOP_PRODUCTS) {
+        if (capacity <= 0) break
+        if (!productUnlocked(product)) continue
+        const available = save.shop.stock[product.id] ?? 0
+        if (available <= 0) continue
+        const take = Math.min(capacity, available)
+        if (take <= 0) continue
+        save.shop.stock[product.id] = available - take
+        capacity -= take
+        sold += take
+        owned.byProduct[product.id] = (owned.byProduct[product.id] ?? 0) + take
+        for (const [key, value] of Object.entries(salePrice(product))) {
+          owned.buffered[key] = (owned.buffered[key] ?? 0) + value * take
+        }
       }
+
+      // Wage is charged per hour the machine actually worked. A machine that
+      // sold nothing is not on shift, so it costs nothing.
+      const workedHours = Math.min(hours, Math.ceil(sold / Math.max(1, machine.perHour)))
+      if (workedHours > 0) owned.hours += workedHours
+      if (sold > 0) owned.soldTotal += sold
+      owned.idleHours += hours - workedHours
       owned.endsAt += hours * 3_600_000
+      changed = true
     }
     if (changed) persist()
   }
 
   /**
-   * Collect a machine's output and pay its wage.
+   * Collect a machine's takings and settle its wage.
    *
    * The wage is charged HERE, not continuously, so letting a machine run a week
    * and never collecting costs nothing upfront and the bill arrives at the moment
    * of profit — the same accounting as 矿工, for the same reason.
+   *
+   * Revenue is credited before the wage is deducted, so "can I afford this hour"
+   * is answered by the hour's own takings rather than by the wallet: a shop that
+   * earned 112 and owes 30 does not need 30 in the bank beforehand.
    */
   function collectMachine(machineId, now = Date.now()) {
     const definition = SHOP_MACHINE_BY_ID.get(machineId)
@@ -5849,32 +6192,52 @@ export function apply(ctx, config = {}) {
     if (owned === undefined || owned.endsAt <= 0) throw new Error(`「${definition.label}」还没买。`)
     accrueMachines(now)
 
-    const granted = {}
-    for (const [productId, count] of Object.entries(owned.buffered)) {
-      if (!SHOP_PRODUCT_BY_ID.has(productId)) continue
-      granted[productId] = count
+    const revenue = {}
+    for (const [key, amount] of Object.entries(owned.buffered)) {
+      if (CURRENCY_KEYS.includes(key) && amount > 0) revenue[key] = amount
     }
-    if (Object.keys(granted).length === 0) throw new Error('还没有产出，再等等。')
+    const sold = owned.soldTotal ?? 0
+    if (Object.keys(revenue).length === 0) {
+      throw new Error('还没有卖出去，再等等——货架上得有货，机器才卖得动。')
+    }
 
-    const total = Object.values(granted).reduce((sum, n) => sum + n, 0)
-    const hours = Math.max(1, Math.round(total / Math.max(1, definition.perHour)))
+    const hours = Math.max(1, owned.hours)
     const wage = {}
     for (const [key, amount] of Object.entries(definition.wagePerHour)) wage[key] = amount * hours
-    if (!canAfford(wage)) throw new Error(`付不起工资：${describeShortfall(wage)}`)
 
+    // Affordability is measured on the NET position, because the revenue is paid
+    // in the same breath as the wage is taken.
+    const short = {}
+    for (const [key, amount] of Object.entries(wage)) {
+      const after = (save.currencies[key] ?? 0) + (revenue[key] ?? 0) - amount
+      if (after < 0) short[key] = -after
+    }
+    if (Object.keys(short).length > 0) {
+      throw new Error(`付不起工资：${describeShortfall(short)}（先收一部分货再收钱也行）`)
+    }
+
+    for (const [key, amount] of Object.entries(revenue)) {
+      save.currencies[key] = (save.currencies[key] ?? 0) + amount
+      save.earned[key] = (save.earned[key] ?? 0) + amount
+      if (save.shop.revenue[key] !== undefined) save.shop.revenue[key] += amount
+    }
     for (const [key, amount] of Object.entries(wage)) save.currencies[key] -= amount
     recordSpend(wage, now)
 
-    // Machine output is STOCK, not items: it goes straight into the back room,
-    // so a night of automation cannot overflow the item pack.
-    for (const [productId, count] of Object.entries(granted)) {
-      save.shop.stock[productId] = (save.shop.stock[productId] ?? 0) + count
-      save.shop.byProduct[productId] = (save.shop.byProduct[productId] ?? 0) + count
-    }
+    const byProduct = { ...owned.byProduct }
     owned.buffered = {}
-    save.shop.autoSales += total
-    save.shop.sales += total
-    save.shop.reputation += total * REPUTATION_PER_SALE
+    owned.byProduct = {}
+    owned.hours = 0
+    owned.soldTotal = 0
+
+    save.shop.autoSales += sold
+    save.shop.sales += sold
+    save.shop.reputation += sold * REPUTATION_PER_SALE
+
+    const net = {}
+    for (const key of new Set([...Object.keys(revenue), ...Object.keys(wage)])) {
+      net[key] = (revenue[key] ?? 0) - (wage[key] ?? 0)
+    }
 
     claimSeq += 1
     pushHistory({
@@ -5882,8 +6245,9 @@ export function apply(ctx, config = {}) {
       at: now,
       kind: 'shop-machine-collect',
       label: definition.label,
-      granted,
+      granted: revenue,
       wage,
+      sold,
     })
 
     const unlocked = reconcileAchievements(now)
@@ -5895,8 +6259,12 @@ export function apply(ctx, config = {}) {
     return {
       machine: machineId,
       label: definition.label,
-      granted,
+      sold,
+      hours,
+      revenue,
       wage,
+      net,
+      byProduct,
       stock: { ...save.shop.stock },
       unlocked,
     }
@@ -6352,6 +6720,14 @@ export function apply(ctx, config = {}) {
       farmPlots: save.farm.plots.length,
       farmPlanted: save.farm.plots.filter((plot) => plot !== null).length,
       farmReady: save.farm.plots.filter((plot) => plot !== null && plotView(plot, now).ready).length,
+      /**
+       * Plots currently carrying an ailment.
+       *
+       * Surfaced as a count so the farm tab can badge a problem the same way it
+       * badges a ripe crop. Ailments only slow growth, so a neglected plot still
+       * finishes — which is exactly why the player forgets about it.
+       */
+      farmAiling: save.farm.plots.filter((plot) => plot !== null && plotView(plot, now).ailments.length > 0).length,
 
       /**
        * Mine standing.
@@ -6874,6 +7250,24 @@ export function apply(ctx, config = {}) {
        * `found: 0` — it was grown, not discovered, and the codex counts only wild
        * finds.
        */
+      /**
+       * 小卖部 — the snack shelf.
+       *
+       * Sent as its own list rather than folded into `items` because the shop
+       * needs prices and affordability, which the item catalogue does not carry.
+       */
+      snacks: SNACKS.map((snack) => ({
+        id: snack.id,
+        label: snack.label,
+        desc: snack.desc,
+        cost: snack.cost,
+        kind: snack.kind,
+        amount: snack.kind === 'stamina' ? snack.stamina : snack.supply,
+        accent: snack.accent,
+        glyph: snack.glyph,
+        affordable: canAfford(snack.cost),
+        packRoom: packUsed() < modifiers().packSize,
+      })),
       items: ALL_ITEMS.map((item) => ({
         id: item.id,
         label: item.label,
@@ -7100,7 +7494,8 @@ export function apply(ctx, config = {}) {
           const owned = save.shop.machines[machine.id]
           const active = owned !== undefined && owned.endsAt > 0
           const buffered = active ? { ...owned.buffered } : {}
-          const bufferedTotal = Object.values(buffered).reduce((sum, n) => sum + n, 0)
+          /** Units this machine sold since the last collection. */
+          const soldTotal = active ? (owned.soldTotal ?? 0) : 0
           return {
             id: machine.id,
             label: machine.label,
@@ -7111,18 +7506,41 @@ export function apply(ctx, config = {}) {
             wagePerHour: machine.wagePerHour,
             affordable: canAfford(machine.hireCost),
             active,
+            /** Takings waiting to be collected, by currency. */
             buffered,
-            bufferedTotal,
+            /** Units sold since the last collection. */
+            soldTotal,
+            /** Hours worked, i.e. what the wage will be charged for. */
+            hours: active ? owned.hours : 0,
+            /** The wage that collecting right now would charge. */
+            wage: (() => {
+              if (!active || owned.hours <= 0) return {}
+              const out = {}
+              for (const [key, amount] of Object.entries(machine.wagePerHour)) out[key] = amount * owned.hours
+              return out
+            })(),
+            /** What collecting right now would leave in your wallet. */
+            net: (() => {
+              if (!active) return {}
+              const out = {}
+              for (const key of new Set([...Object.keys(buffered), ...Object.keys(machine.wagePerHour)])) {
+                const paid = (machine.wagePerHour[key] ?? 0) * Math.max(0, owned.hours)
+                out[key] = (buffered[key] ?? 0) - paid
+              }
+              return out
+            })(),
             /**
-             * Hours' worth of output waiting in the buffer.
+             * True when the machine has hours to bill but nothing to sell.
              *
-             * Derived from the BUFFER, not from `now - endsAt`: `accrueMachines`
-             * advances `endsAt` to the present whenever it credits anything, so
-             * the timestamp difference is ~0 on a machine that has been running
-             * for days. The buffer is what the player is about to collect, so
-             * that is what this describes.
+             * That is the state the shop UI has to call out: the machine will not
+             * earn until the shelf is restocked, and telling the player is the
+             * difference between "this is broken" and "go buy stock".
              */
-            hours: active ? Math.floor(bufferedTotal / Math.max(1, machine.perHour)) : 0,
+            starved: active && owned.hours === 0 && owned.soldTotal === 0,
+            /** Total units this machine has sold since it was bought. */
+            lifetimeSold: owned.soldTotal ?? 0,
+            /** Hours it stood idle because the shelf was empty. */
+            idleHours: owned.idleHours ?? 0,
           }
         }),
       },
@@ -8018,6 +8436,11 @@ export function apply(ctx, config = {}) {
         if (method === 'POST' && routePath === '/star') {
           const body = await readJson(req)
           const result = buyStarUpgrade(typeof body.upgrade === 'string' ? body.upgrade : '')
+          return send(200, { ...snapshot(), result })
+        }
+        if (method === 'POST' && routePath === '/snack') {
+          const body = await readJson(req)
+          const result = buySnack(typeof body.snack === 'string' ? body.snack : '')
           return send(200, { ...snapshot(), result })
         }
         if (method === 'POST' && routePath === '/use') {
