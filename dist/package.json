@@ -1,0 +1,34 @@
+{
+  "name": "@local/dsh-moyu",
+  "version": "1.6.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 摸鱼插件｜每日签到与缓慢养成，给 agent 干活时的你一点消遣。基于 DeepSeek Harness (dsh)",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yizhiyangyangqwq/dsh-moyu"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}
