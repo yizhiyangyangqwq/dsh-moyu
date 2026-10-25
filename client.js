@@ -26,6 +26,38 @@ window.__ModuleLoader__.load({
     const h = React.createElement
 
     /**
+     * Surface plugin crashes instead of leaving a silent white page.
+     *
+     * A throw during initialisation used to leave the shell with no plugin at
+     * all — no badge, no panel, nothing but an empty spot where it used to be,
+     * and the only evidence was a console line nobody opens. This mounts a small
+     * error marker beside the settings button if anything in this file throws
+     * while registering, so "the plugin is broken" is at least visible.
+     */
+    const reportCrash = (message) => {
+      try {
+        const el = document.createElement('div')
+        el.title = `dsh-moyu 加载失败：${message}（点击控制台看详情）`
+        el.textContent = '⚠'
+        el.style.cssText = [
+          'position:fixed', 'left:12px', 'bottom:64px', 'z-index:99999',
+          'width:26px', 'height:26px', 'border-radius:8px',
+          'display:flex', 'align-items:center', 'justify-content:center',
+          'background:#2d1517', 'color:#f85149',
+          'border:1px solid #f85149', 'font-size:15px', 'cursor:help',
+        ].join(';')
+        document.body?.appendChild(el)
+      } catch {
+        // The page may not be ready; the console error above still stands.
+      }
+    }
+    if (typeof window.addEventListener === 'function') window.addEventListener('error', (event) => {
+      if (String(event.filename || '').includes('dsh-moyu') || String(event.filename || '').includes('client')) {
+        reportCrash(event.message)
+      }
+    })
+
+    /**
      * The panel's key, used by `main`, `sidebar.panellist` and `layout.selectPanel`.
      *
      * Renamed with the package so the row id and the panel key agree; a stale key
@@ -397,6 +429,23 @@ window.__ModuleLoader__.load({
         setBusy(true)
         try {
           const next = await post('/sell', { item, count })
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          setError(message)
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
+      /** Lock or unlock a stack so it cannot be sold. */
+      const lock = React.useCallback(async (item) => {
+        setBusy(true)
+        try {
+          const next = await post('/pack-lock', { item })
           setData(next)
           setError(null)
           return next.result
@@ -838,6 +887,38 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      /** Fill every empty plot with one crop. */
+      const plantAll = React.useCallback(async (crop) => {
+        setBusy(true)
+        try {
+          const next = await post('/plant-all', { crop })
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err))
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
+      /** Dig up a plot. Refunds nothing; that is the point. */
+      const dig = React.useCallback(async (plot) => {
+        setBusy(true)
+        try {
+          const next = await post('/dig', { plot })
+          setData(next)
+          setError(null)
+          return next.result
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err))
+          throw err
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
       const fishCast = React.useCallback(async () => {
         setBusy(true)
         try {
@@ -1033,6 +1114,8 @@ window.__ModuleLoader__.load({
         markNoticeRead,
         dismissAutoUpdate,
         buySnack,
+        plantAll,
+        dig,
         mineSwing,
         mineDescend,
         mineCollect,
@@ -2397,6 +2480,41 @@ window.__ModuleLoader__.load({
      * it is static, and re-sending it every few seconds would be pure waste.
      */
     function SettingsPanel({ values, busy, onSave, onReset, showToast }) {
+      /**
+       * Keys whose "已改动" chip is briefly visible.
+       *
+       * A permanent chip on every changed row turned the settings page into a
+       * wall of badges that never went away — it answered "what did I just
+       * change" long after anyone cared. This flashes the chip for a couple of
+       * seconds at the moment of the change, then clears it. Whether a value
+       * differs from the default is still visible from the control itself.
+       */
+      const [justChanged, setJustChanged] = React.useState(() => new Set())
+      const flashTimers = React.useRef(new Map())
+      const flash = React.useCallback((key) => {
+        setJustChanged((previous) => new Set(previous).add(key))
+        const existing = flashTimers.current.get(key)
+        if (existing !== undefined) clearTimeout(existing)
+        flashTimers.current.set(
+          key,
+          setTimeout(() => {
+            setJustChanged((previous) => {
+              const next = new Set(previous)
+              next.delete(key)
+              return next
+            })
+            flashTimers.current.delete(key)
+          }, 2200),
+        )
+      }, [])
+      React.useEffect(
+        () => () => {
+          for (const timer of flashTimers.current.values()) clearTimeout(timer)
+          flashTimers.current.clear()
+        },
+        [],
+      )
+
       const [schema, setSchema] = React.useState(null)
       const [loadError, setLoadError] = React.useState(null)
       const [armed, setArmed] = React.useState(false)
@@ -2416,10 +2534,36 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      /**
+       * The 设置 page needs the palette too.
+       *
+       * It is its own component with its own root element, so the variables that
+       * `CheckinPage` sets on ITS root never reach it — which is why changing the
+       * theme colour appeared to do nothing on the very page you changed it from.
+       */
+      const themeVars = React.useMemo(() => {
+        const ACCENTS = {
+          blue: '#4d6bfe',
+          green: '#3fb950',
+          gold: '#e3b341',
+          purple: '#a371f7',
+          cyan: '#39c5cf',
+          red: '#f85149',
+        }
+        const corner = values?.cornerStyle ?? 'default'
+        const density = values?.wallDensity ?? 'cozy'
+        return {
+          '--moyu-accent': ACCENTS[values?.accentColor] ?? ACCENTS.blue,
+          '--moyu-radius-lg': corner === 'soft' ? '16px' : corner === 'square' ? '4px' : '10px',
+          '--moyu-radius-md': corner === 'soft' ? '12px' : corner === 'square' ? '3px' : '8px',
+          '--moyu-card-min': density === 'dense' ? '150px' : density === 'compact' ? '190px' : '230px',
+        }
+      }, [values?.accentColor, values?.cornerStyle, values?.wallDensity])
+
       if (schema === null) {
         return h(
           'div',
-          { style: styles.page },
+          { style: { ...styles.page, ...themeVars } },
           h('div', { style: styles.empty }, loadError === null ? '正在读取设置…' : `读不到设置：${loadError}`),
         )
       }
@@ -2516,7 +2660,9 @@ window.__ModuleLoader__.load({
                       'div',
                       { style: styles.periodTitleRow },
                       h('span', { style: styles.periodLabel }, entry.label),
-                      changed ? h('span', { style: styles.questReadyChip }, '已改动') : null,
+                      justChanged.has(entry.key)
+                        ? h('span', { style: styles.questReadyChip }, '已更新')
+                        : null,
                     ),
                     h('div', { style: styles.shopDesc }, entry.desc),
                     pairLocked
@@ -2550,7 +2696,7 @@ window.__ModuleLoader__.load({
                               key: option.value,
                               type: 'button',
                               onClick: () =>
-                                onSave({ [entry.key]: option.value }).catch((err) => {
+                                onSave({ [entry.key]: option.value }).then(() => flash(entry.key)).catch((err) => {
                                   showToast(err instanceof Error ? err.message : String(err))
                                 }),
                               disabled: busy,
@@ -2565,11 +2711,11 @@ window.__ModuleLoader__.load({
                                 borderRadius: '999px',
                                 border:
                                   value === option.value
-                                    ? '1px solid var(--moyu-accent, var(--moyu-accent, var(--dsw-alias-brand-primary)))'
+                                    ? '1px solid var(--moyu-accent, var(--dsw-alias-brand-primary))'
                                     : '1px solid var(--dsw-alias-border-l2)',
                                 background:
                                   value === option.value
-                                    ? 'color-mix(in srgb, var(--moyu-accent, var(--moyu-accent, var(--dsw-alias-brand-primary))) 16%, transparent)'
+                                    ? 'color-mix(in srgb, var(--moyu-accent, var(--dsw-alias-brand-primary)) 16%, transparent)'
                                     : 'transparent',
                                 color:
                                   value === option.value
@@ -2603,7 +2749,7 @@ window.__ModuleLoader__.load({
                         {
                           type: 'button',
                           onClick: () =>
-                            onSave({ [entry.key]: !value }).catch((err) => {
+                            onSave({ [entry.key]: !value }).then(() => flash(entry.key)).catch((err) => {
                               // A rejected patch (usually a stale tab racing the
                               // pair rule) must not vanish silently: the toggle
                               // snaps back, and the toast says why.
@@ -2800,6 +2946,8 @@ window.__ModuleLoader__.load({
         markNoticeRead,
         dismissAutoUpdate,
         buySnack,
+        plantAll,
+        dig,
         mineSwing,
         mineDescend,
         mineCollect,
@@ -2821,6 +2969,10 @@ window.__ModuleLoader__.load({
       } = useCheckin(PANEL_POLL_MS, !STATIC_TABS.has(tab))
       const [toast, setToast] = React.useState(null)
       const [showLocked, setShowLocked] = React.useState(false)
+      /** Which plot is armed for digging (two-click confirm). */
+      const [digArmed, setDigArmed] = React.useState(null)
+      /** The crop the 一键种地 button will use. Defaults to the first crop. */
+      const [plantAllCrop, setPlantAllCrop] = React.useState(() => data?.crops?.[0]?.id ?? 'radish')
       /** 'list' is the original flat wall; 'tree' is the pan-and-drag graph. */
       const [achView, setAchView] = React.useState('list')
       /** Which codex tab is showing inside 背包. */
@@ -2899,6 +3051,38 @@ window.__ModuleLoader__.load({
         }
       }, [data?.settings?.accentColor, data?.settings?.cornerStyle, data?.settings?.wallDensity])
 
+      /**
+       * Items the player has never seen in the pack before.
+       *
+       * Reported as a tab badge because a new item arriving is exactly the kind
+       * of thing that happens while you are looking at another tab.
+       *
+       * ⚠ These hooks MUST run before the empty-state return below. They were
+       * once placed after it, and the first load (data === null) skipped them
+       * while the second ran them — React error #310, hooks count changed, and
+       * the whole panel white-screened the moment data arrived.
+       */
+      const seenItems = React.useRef(null)
+      const [newItemIds, setNewItemIds] = React.useState(() => new Set())
+      const packSignature = (data?.state?.pack ?? []).map((row) => row.item).join(',')
+      React.useEffect(() => {
+        const current = (data?.state?.pack ?? []).map((row) => row.item)
+        if (seenItems.current === null) {
+          // First load: everything already in the pack is old news.
+          seenItems.current = new Set(current)
+          return
+        }
+        const fresh = current.filter((id) => !seenItems.current.has(id))
+        if (fresh.length > 0) {
+          for (const id of fresh) seenItems.current.add(id)
+          setNewItemIds((previous) => {
+            const next = new Set(previous)
+            for (const id of fresh) next.add(id)
+            return next
+          })
+        }
+      }, [packSignature])
+
       if (data === null) {
         return h(
           'div',
@@ -2908,6 +3092,26 @@ window.__ModuleLoader__.load({
       }
 
       const state = data.state
+      /**
+       * How many plots are empty.
+       *
+       * Derived here rather than read off a snapshot field because "empty" is a
+       * presentation concept: the host stores `null` slots and the panel turns
+       * them into `{ empty: true }`, so the count comes from the same array the
+       * plot grid renders.
+       */
+      const emptyPlots = (data.farm?.plots ?? []).filter((plot) => plot?.empty === true).length
+      /**
+       * Items the player has never seen in the pack before.
+       *
+       * Reported as a tab badge because a new item arriving is exactly the kind
+       * of thing that happens while you are looking at another tab — an
+       * expedition returns, a chest opens, a fish is caught — and the player's
+       * complaint was that it happened with no indication anywhere.
+       *
+       * The set is kept in a ref, not state: it is a "have I seen this" ledger,
+       * and changing it must not itself cause a render.
+       */
       const achievements = data.achievements
       const unlockedCount = achievements.filter((entry) => entry.unlockedAt !== null).length
       /** Quests that are done but unclaimed — the only thing worth badging. */
@@ -3082,6 +3286,15 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const onLock = async (item) => {
+        try {
+          const result = await lock(item)
+          showToast(result.locked ? `已锁定「${itemMeta(item)?.label ?? item}」，不会卖掉了` : `已解锁`)
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : String(err))
+        }
+      }
+
       const onUse = async (item) => {
         try {
           const result = await use(item)
@@ -3176,6 +3389,41 @@ window.__ModuleLoader__.load({
           }
           const lost = result.lost > 0 ? `　背包满了，落下 ${result.lost} 份` : ''
           showToast(`收了 ${result.harvested} 块地，共 ${result.stored} 份${lost}`)
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : String(err))
+        }
+      }
+
+      /** Fill every empty plot with the chosen crop. */
+      const onPlantAll = async (cropId) => {
+        try {
+          const result = await plantAll(cropId)
+          showToast(
+            `种下 ${result.planted} 块${result.label}` +
+              (result.stoppedBy === 'money' ? '（钱不够，剩下的没种）' : ''),
+          )
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : String(err))
+        }
+      }
+
+      /**
+       * Dig up one plot.
+       *
+       * Two clicks, because it destroys a growing crop and refunds nothing — the
+       * same rule 转生 and 提前返回 follow: an irreversible loss is never one
+       * click away.
+       */
+      const onDig = async (index) => {
+        if (digArmed !== index) {
+          setDigArmed(index)
+          showToast('再点一次确认铲掉 —— 铲了没有收益，种子也不退')
+          return
+        }
+        setDigArmed(null)
+        try {
+          const result = await dig(index)
+          showToast(`铲掉了${result.label}，这块地空出来了`)
         } catch (err) {
           showToast(err instanceof Error ? err.message : String(err))
         }
@@ -3492,14 +3740,25 @@ window.__ModuleLoader__.load({
             // still finishes — which is precisely why the player forgets it, and
             // why a silent debuff is the wrong default.
             { key: 'farm', label: '农场', badge: Math.max(state.farmReady, state.farmAiling ?? 0), show: data.settings.showFarm },
-            // Badge mining only when there is actually something to do with the
-            // stamina you have: a full bag waiting to be collected, or enough
-            // stamina for a swing. Otherwise the dot would be permanent noise.
+            /**
+             * Badge mining ONLY when stamina is full, or when the bag has ore.
+             *
+             * It used to fire at "at least one point", which meant the dot
+             * relit every six minutes forever — the player described it as
+             * "每获得一个体力就会提示可以挖矿，这太烦人了". A badge that is on
+             * more often than off is not a signal.
+             *
+             * Full stamina is the state worth interrupting for: that is the only
+             * moment where waiting longer costs you regeneration.
+             */
             {
               key: 'mine',
               label: '挖矿',
               badge:
-                (state.mineBuffered ?? 0) > 0 || (state.mineStamina ?? 0) >= 1 ? 1 : 0,
+                (state.mineBuffered ?? 0) > 0 ||
+                ((state.mineStamina ?? 0) >= (state.mineStaminaCap ?? 20) && (state.mineStaminaCap ?? 20) > 0)
+                  ? 1
+                  : 0,
               show: data.settings.showMine,
             },
             {
@@ -3508,7 +3767,7 @@ window.__ModuleLoader__.load({
               badge: state.trip !== null && state.trip.ready ? 1 : 0,
               show: data.settings.showTrip,
             },
-            { key: 'pack', label: '背包', badge: 0 },
+            { key: 'pack', label: '背包', badge: newItemIds.size },
             { key: 'alchemy', label: '炼金', badge: 0, show: data.settings.showAlchemy },
             { key: 'shop', label: '商店', badge: 0 },
             // 钓鱼 and 开店 are their own tabs. The key is `store` rather than
@@ -3552,7 +3811,11 @@ window.__ModuleLoader__.load({
                 {
                   key: entry.key,
                   type: 'button',
-                  onClick: () => setTab(entry.key),
+                  onClick: () => {
+                    setTab(entry.key)
+                    // Opening the pack is what acknowledges the new items.
+                    if (entry.key === 'pack' && newItemIds.size > 0) setNewItemIds(new Set())
+                  },
                   style: tab === entry.key ? styles.tabActive : styles.tab,
                   title: entry.label,
                 },
@@ -3940,9 +4203,15 @@ window.__ModuleLoader__.load({
                         if (meta === null) return null
                         const sellable = meta.kind === 'sell' && meta.sellValue !== null
                         const usable = meta.kind !== 'sell'
+                        /**
+                         * Locked stacks sit at the bottom (the host sorts them) and
+                         * their sell buttons are disabled, so a consumable being
+                         * saved cannot be sold by a stray click.
+                         */
+                        const locked = row.locked === true
                         return h(
                           'div',
-                          { key: row.item, style: styles.packRow },
+                          { key: row.item, style: locked ? styles.packRowLocked : styles.packRow },
                           h(
                             'div',
                             { style: { ...styles.packGlyph, color: `var(${meta.accent})` } },
@@ -3968,6 +4237,18 @@ window.__ModuleLoader__.load({
                                 },
                                 meta.rarityLabel,
                               ),
+                              locked
+                                ? h(
+                                    'span',
+                                    {
+                                      style: {
+                                        ...styles.rarityChip,
+                                        color: 'var(--dsw-alias-state-warn-primary)',
+                                      },
+                                    },
+                                    '已锁定',
+                                  )
+                                : null,
                             ),
                             h('div', { style: styles.shopDesc }, meta.desc),
                             sellable
@@ -3997,8 +4278,9 @@ window.__ModuleLoader__.load({
                                     {
                                       type: 'button',
                                       onClick: () => onSell(row.item, 1),
-                                      disabled: busy,
-                                      style: busy ? styles.buyButtonDisabled : styles.buyButton,
+                                      disabled: busy || locked,
+                                      style: busy || locked ? styles.buyButtonDisabled : styles.buyButton,
+                                      title: locked ? '已锁定，先解锁' : undefined,
                                     },
                                     '卖 1',
                                   ),
@@ -4008,14 +4290,29 @@ window.__ModuleLoader__.load({
                                         {
                                           type: 'button',
                                           onClick: () => onSell(row.item, row.count),
-                                          disabled: busy,
-                                          style: busy ? styles.buyButtonDisabled : styles.buyButton,
+                                          disabled: busy || locked,
+                                          style: busy || locked ? styles.buyButtonDisabled : styles.buyButton,
+                                          title: locked ? '已锁定，先解锁' : undefined,
                                         },
                                         `全卖`,
                                       )
                                     : null,
                                 )
                               : null,
+                            // The lock is available on EVERY row, not just sellable
+                            // ones: the request was about consumables, and a stack
+                            // that cannot be sold today may be sellable later.
+                            h(
+                              'button',
+                              {
+                                type: 'button',
+                                onClick: () => onLock(row.item),
+                                disabled: busy,
+                                style: busy ? styles.buyButtonDisabled : styles.buyButton,
+                                title: locked ? '解锁，允许卖出' : '锁定，不参与卖出',
+                              },
+                              locked ? '🔒 解锁' : '🔓 锁定',
+                            ),
                             usable
                               ? h(
                                   'button',
@@ -4345,6 +4642,47 @@ window.__ModuleLoader__.load({
                   },
                   '一键照看',
                 ),
+                /**
+                 * 一键种地: pick a crop, fill every empty plot with it.
+                 *
+                 * Rendered as a select plus a button rather than eight buttons,
+                 * because eight "种满" buttons would crowd out the two actions
+                 * people actually use on every visit (收获 / 照看).
+                 */
+                h(
+                  'select',
+                  {
+                    value: plantAllCrop,
+                    onChange: (event) => setPlantAllCrop(event.target.value),
+                    disabled: busy || emptyPlots === 0,
+                    title: emptyPlots === 0 ? '没有空地' : '选择一键种地要用的作物',
+                    style: {
+                      height: '30px',
+                      padding: '0 8px',
+                      borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      background: 'var(--dsw-alias-bg-layer-2)',
+                      color: 'var(--dsw-alias-label-primary)',
+                      fontFamily: 'inherit',
+                      fontSize: '12.5px',
+                      cursor: busy || emptyPlots === 0 ? 'not-allowed' : 'pointer',
+                    },
+                  },
+                  data.crops.map((crop) =>
+                    h('option', { key: crop.id, value: crop.id }, crop.label),
+                  ),
+                ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: () => onPlantAll(plantAllCrop),
+                    disabled: busy || emptyPlots === 0,
+                    title: emptyPlots === 0 ? '没有空地' : `把 ${emptyPlots} 块空地都种上`,
+                    style: busy || emptyPlots === 0 ? styles.buyButtonDisabled : styles.buyButton,
+                  },
+                  emptyPlots > 0 ? `一键种地（${emptyPlots}）` : '没有空地',
+                ),
                 data.farm.expandCost === null
                   ? h('span', { style: styles.maxedTag }, '已是最大规模')
                   : h(
@@ -4527,6 +4865,52 @@ window.__ModuleLoader__.load({
                                   },
                                   plot.ailments.length > 0 ? '除害' : '浇水',
                                 ),
+                            /**
+                             * 铲子 — dig up a crop you regret planting.
+                             *
+                             * Small and quiet rather than a full-width button: it
+                             * is a destructive action with no upside, so it should
+                             * be findable without being inviting. Armed on the
+                             * first click (see onDig) because it destroys a crop.
+                             */
+                            h(
+                              'button',
+                              {
+                                type: 'button',
+                                onClick: () => onDig(plot.index),
+                                disabled: busy,
+                                title: '铲掉这块地——没有收益，种子也不退',
+                                'aria-label': `铲掉第 ${plot.index + 1} 块地`,
+                                style: digArmed === plot.index
+                                  ? {
+                                      flex: 'none',
+                                      height: '24px',
+                                      padding: '0 8px',
+                                      borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
+                                      border: '1px solid var(--dsw-alias-state-error-primary)',
+                                      background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent)',
+                                      color: 'var(--dsw-alias-state-error-primary)',
+                                      fontFamily: 'inherit',
+                                      fontSize: '11.5px',
+                                      cursor: 'pointer',
+                                      whiteSpace: 'nowrap',
+                                    }
+                                  : {
+                                      flex: 'none',
+                                      width: '24px',
+                                      height: '24px',
+                                      borderRadius: 'var(--moyu-radius-md, var(--dsw-radius-md))',
+                                      border: '1px solid var(--dsw-alias-border-l2)',
+                                      background: 'transparent',
+                                      color: 'var(--dsw-alias-label-quaternary)',
+                                      fontFamily: 'inherit',
+                                      fontSize: '12px',
+                                      lineHeight: 1,
+                                      cursor: busy ? 'not-allowed' : 'pointer',
+                                    },
+                              },
+                              digArmed === plot.index ? '确认铲掉？' : '✕',
+                            ),
                           ),
                         ),
                   ),
@@ -4578,73 +4962,112 @@ window.__ModuleLoader__.load({
 
               // ── 小卖部 ──
               /**
-               * The tuck shop lives at the BOTTOM of 农场 on purpose.
+               * The shop. It exists in exactly ONE place: the bottom of 农场.
                *
-               * It is not a system of its own — it sells snacks that restore the
-               * two resources you have to wait for, and the farm is the page you
-               * open when you are waiting anyway. Putting it here means "while I
-               * am in the garden, I can grab something for the road."
+               * There is deliberately no other mount point — not 挖矿, not 出门,
+               * not 背包. It used to appear in several panels and was reported as
+               * clutter everywhere else ("别的板块小卖部比较多余"), and then it
+               * was reported as "still showing elsewhere" because the old client
+               * was cached. Both complaints point at the same rule, so the rule is
+               * enforced here and verified by tools/test-farm.mjs: one mount, at
+               * the end of the farm tab.
+               *
+               * Two shelves share the layout:
+               *
+               *   · 零食 — bought into the PACK and eaten from there when needed,
+               *     which is why a cola can travel on an expedition.
+               *   · 农场增益 — applied to every plot the moment it is bought, so
+               *     it carries no "持续" chip into the pack.
                */
               h(
                 'div',
                 { style: styles.sectionTitle },
                 '小卖部',
-                h('span', { style: styles.sectionHint }, '买点喝的，带出门或者下矿'),
+                h('span', { style: styles.sectionHint }, '农场最底部　·　零食进背包　·　农场增益立刻全场生效'),
               ),
-              h(
-                'div',
-                { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' } },
-                (data.snacks ?? []).map((snack) =>
+              ['零食', '农场增益'].map((shelfName) => {
+                const shelf = (data.snacks ?? []).filter((snack) => snack.group === shelfName)
+                if (shelf.length === 0) return null
+                return h(
+                  React.Fragment,
+                  { key: shelfName },
+                  h('div', { style: styles.shopShelfTitle }, shelfName),
                   h(
                     'div',
-                    {
-                      key: snack.id,
-                      style: {
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px',
-                        padding: '13px 15px',
-                        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
-                        border: '0.5px solid var(--dsw-alias-border-l2)',
-                        background: 'var(--dsw-alias-bg-layer-2)',
-                      },
-                    },
-                    h(
-                      'div',
-                      { style: { display: 'flex', alignItems: 'baseline', gap: '8px' } },
-                      h('span', { style: { fontSize: '17px', color: `var(${snack.accent})` }, 'aria-hidden': true }, snack.glyph),
-                      h('span', { style: { fontSize: '14px', fontWeight: 500 } }, snack.label),
-                    ),
-                    h(
-                      'div',
-                      { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)', lineHeight: '1.5' } },
-                      snack.desc,
-                    ),
-                    h(
-                      'div',
-                      { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-quaternary)' } },
-                      snack.kind === 'stamina' ? `体力 +${snack.amount}` : `物资 +${snack.amount}`,
-                    ),
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        onClick: () => onBuySnack(snack.id),
-                        disabled: busy || !snack.affordable || !snack.packRoom,
-                        title: !snack.packRoom ? '背包满了' : !snack.affordable ? '钱不够' : '',
-                        style: busy || !snack.affordable || !snack.packRoom
-                          ? styles.buyButtonDisabled
-                          : styles.claimButton,
-                      },
-                      !snack.packRoom
-                        ? '背包满了'
-                        : `买一个　${Object.entries(snack.cost)
-                            .map(([k, v]) => `${currencySymbol(k)} ${formatNumber(v)}`)
-                            .join(' ')}`,
+                    { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '10px' } },
+                    shelf.map((snack) =>
+                      h(
+                        'div',
+                        {
+                          key: snack.id,
+                          style: {
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px',
+                            padding: '13px 15px',
+                            borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
+                            border: snack.active
+                              ? '1px solid var(--dsw-alias-state-success-primary)'
+                              : '0.5px solid var(--dsw-alias-border-l2)',
+                            background: 'var(--dsw-alias-bg-layer-2)',
+                          },
+                        },
+                        h(
+                          'div',
+                          { style: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' } },
+                          h('span', { style: { fontSize: '17px', color: `var(${snack.accent})` }, 'aria-hidden': true }, snack.glyph),
+                          h('span', { style: { fontSize: '14px', fontWeight: 500 } }, snack.label),
+                          // A running farm effect is stated on the card, so re-buying
+                          // is an informed choice rather than a guess about stacking.
+                          snack.active
+                            ? h(
+                                'span',
+                                { style: styles.questReadyChip },
+                                `生效中 ${formatCountdown(snack.remainingMs)}`,
+                              )
+                            : null,
+                        ),
+                        h(
+                          'div',
+                          { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)', lineHeight: '1.55' } },
+                          snack.desc,
+                        ),
+                        h(
+                          'div',
+                          { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-quaternary)' } },
+                          // A host older than this client sends neither field. Reading
+                          // through a missing `buff` used to throw and take the whole
+                          // panel down, so a refresh before the host restarted looked
+                          // exactly like a white screen. Degrade, never explode.
+                          snack.kind === 'farm'
+                            ? typeof snack.buff?.ms === 'number'
+                              ? `持续 ${formatHours(snack.buff.ms / 3_600_000)}　·　全场生效`
+                              : '买了立刻对全场生效'
+                            : snack.kind === 'stamina'
+                              ? `喝下去 体力 +${formatNumber(snack.amount ?? 0)}`
+                              : `喝下去 物资 +${formatNumber(snack.amount ?? 0)}`,
+                        ),
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            onClick: () => onBuySnack(snack.id),
+                            disabled: busy || !snack.affordable,
+                            style: busy || !snack.affordable ? styles.buyButtonDisabled : styles.claimButton,
+                          },
+                          !snack.affordable
+                            ? `钱不够（${Object.entries(snack.cost)
+                                .map(([k, v]) => `${currencySymbol(k)} ${formatNumber(v)}`)
+                                .join(' ')}）`
+                            : `${snack.active ? '续上' : '买一个'}　${Object.entries(snack.cost)
+                                .map(([k, v]) => `${currencySymbol(k)} ${formatNumber(v)}`)
+                                .join(' ')}`,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                )
+              }),
 
         // ── mine tab ──
         tab !== 'mine'
@@ -5078,6 +5501,21 @@ window.__ModuleLoader__.load({
                       : `需要 ${data.rebirth.required} 级`,
                   ),
                 ),
+                /**
+                 * Break the payout into its two halves.
+                 *
+                 * A single "✶ 7" cannot explain why a player's tenth rebirth pays
+                 * more than their first, and the whole reason the bonus exists is
+                 * to make repeat runs feel worth starting. Spelling it out is what
+                 * turns the number into a reason to go again.
+                 */
+                data.rebirth.eligible && data.rebirth.starsFromCount > 0
+                  ? h(
+                      'div',
+                      { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
+                      `等级 ${data.rebirth.starsFromLevel}　+　重来 ${data.rebirth.starsFromCount}（第 ${data.rebirth.count + 1} 次转生）`,
+                    )
+                  : null,
                 // Naming both halves explicitly is the whole point of a prestige
                 // screen: the player must know what they lose before they commit.
                 h(
@@ -5509,46 +5947,72 @@ window.__ModuleLoader__.load({
               {
                 type: 'button',
                 onClick: run(onSwing),
-                disabled: busy || noStamina,
-                style: btn(!busy && !noStamina, true),
-                title: noStamina ? '体力不够了' : '消耗 1 点体力',
+                disabled: busy || noStamina || mine.bagFull,
+                style: btn(!busy && !noStamina && !mine.bagFull, true),
+                title: noStamina
+                  ? '体力不够了'
+                  : mine.bagFull
+                    ? '矿袋满了，先收进背包'
+                    : '消耗 1 点体力',
               },
-              noStamina ? '体力不够' : '挥一镐（-1 体力）',
+              // A full bag is checked BEFORE the stamina, both here and on the
+              // host, so the button never invites a swing that would be wasted.
+              mine.bagFull ? '矿袋满了' : noStamina ? '体力不够' : '挥一镐（-1 体力）',
             ),
           ),
         ),
 
-        // ── the bag ──
-        bag.length === 0 && mine.bufferedTotal === 0
-          ? null
-          : h(
+        /**
+         * ── the swing bag ──
+         *
+         * Shown even when empty, because the number that matters is how many
+         * swings are LEFT before it fills — the bag filling up unnoticed is
+         * exactly how a swing got wasted ("满了会白挖一次"). The counter turns
+         * into a warning as it runs low, so refilling is never a surprise.
+         */
+        h(
+          'div',
+          { style: card },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
+            h(
               'div',
-              { style: card },
+              { style: { flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' } },
               h(
                 'div',
-                { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
-                h(
-                  'div',
-                  { style: { flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' } },
-                  h('div', { style: { fontSize: '14px', fontWeight: 500 } }, `矿袋里有 ${mine.bufferedTotal} 块`),
-                  h(
-                    'div',
-                    { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
-                    bag.map(([id, count]) => `${oreLabel(id)} ×${count}`).join('　·　'),
-                  ),
-                ),
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    onClick: run(onCollect),
-                    disabled: busy || mine.bufferedTotal === 0,
-                    style: btn(!busy && mine.bufferedTotal > 0, true),
-                  },
-                  '收进背包',
-                ),
+                { style: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' } },
+                h('div', { style: { fontSize: '14px', fontWeight: 500 } }, `矿袋 ${mine.bufferedTotal} / ${mine.bagCapacity}`),
+                mine.bagFull
+                  ? h('span', { style: styles.questReadyChip }, '满了 · 先收取')
+                  : mine.bagSwingsLeft <= 2
+                    ? h(
+                        'span',
+                        { style: { fontSize: '11.5px', color: 'var(--dsw-alias-state-warning-primary, #c98a00)', fontWeight: 500 } },
+                        `还能挖 ${mine.bagSwingsLeft} 镐`,
+                      )
+                    : null,
+              ),
+              h(
+                'div',
+                { style: { fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary)' } },
+                bag.length === 0
+                  ? '还是空的。镐下出来的矿先放这里，收进背包才算拿到。'
+                  : bag.map(([id, count]) => `${oreLabel(id)} ×${count}`).join('　·　'),
               ),
             ),
+            h(
+              'button',
+              {
+                type: 'button',
+                onClick: run(onCollect),
+                disabled: busy || mine.bufferedTotal === 0,
+                style: btn(!busy && mine.bufferedTotal > 0, true),
+              },
+              '收进背包',
+            ),
+          ),
+        ),
 
         // ── descend ──
         h(
@@ -6479,6 +6943,27 @@ window.__ModuleLoader__.load({
                           .map(([k, v]) => `${currencySymbol(k)}${v}`)
                           .join('+')}/小时`,
                       ),
+                      /**
+                       * What the machine actually moved, per product.
+                       *
+                       * Shown because "卖出 N 份" alone cannot reveal that every
+                       * unit was the same cheap item — which is exactly how 蛋糕
+                       * and 宴席 sat unsold while the counter looked busy.
+                       */
+                      machine.active && Object.keys(machine.byProduct ?? {}).length > 0
+                        ? h(
+                            'div',
+                            { style: { ...styles.shopDesc, fontSize: '10.5px' } },
+                            Object.entries(machine.byProduct)
+                              .map(([id, count]) => {
+                                const product = store.products.find((entry) => entry.id === id)
+                                // Fall back to the raw id rather than rendering
+                                // "undefined" if the product table ever changes.
+                                return `${product === undefined ? id : product.label} ×${formatNumber(count)}`
+                              })
+                              .join('　'),
+                          )
+                        : null,
                     ),
                     machine.active
                       ? h(
@@ -7833,6 +8318,20 @@ window.__ModuleLoader__.load({
         border: '0.5px solid var(--dsw-alias-settings-card-stroke)',
         background: 'var(--dsw-alias-settings-card-fill)',
       },
+      /**
+       * A locked row reads as "deliberately set aside": dimmed, with a dashed
+       * edge so it is obvious at a glance which stacks are out of the sell flow.
+       */
+      packRowLocked: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        padding: '10px 14px',
+        borderRadius: 'var(--moyu-radius-lg, var(--dsw-radius-lg))',
+        border: '1px dashed var(--dsw-alias-state-warn-primary, var(--dsw-alias-border-l2))',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        opacity: 0.72,
+      },
       packGlyph: { fontSize: '18px', lineHeight: '20px', flex: 'none', width: '20px', textAlign: 'center' },
       packMain: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' },
       packActions: { display: 'flex', alignItems: 'center', gap: '6px', flex: 'none' },
@@ -7940,6 +8439,13 @@ window.__ModuleLoader__.load({
       },
 
       // ── farm ──
+      /** A shelf label inside 小卖部: 零食 / 农场增益. */
+      shopShelfTitle: {
+        fontSize: '12px',
+        fontWeight: 500,
+        color: 'var(--dsw-alias-label-secondary)',
+        margin: '4px 0 -4px',
+      },
       plotGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
