@@ -113,11 +113,15 @@ const UPDATE_FILES = ['index.js', 'client.js', 'package.json']
 export const CHANGELOG = [
   {
     version: '1.6.0',
-    date: '2026-10-23',
-    title: '外观设置与滚动优化',
+    date: '2026-10-25',
+    title: '玩家反馈的五处修正',
     notes: [
+      '小卖部现在只在农场页最底部出现，其他板块不再有它。商品分两个货架：零食（可乐 / 雪碧 / 雪糕）买进背包、要用时自己喝；农场增益（化肥 / 洒水器 / 驱虫剂）买了立刻对全场生效、持续两小时。',
+      '挖矿：矿袋满了不会再白挖。之前是先扣体力、先毁矿脉，然后才检查矿袋——所以满袋时每挥一镐都白赔一条矿脉。现在先查容量再扣体力，界面上还写着「矿袋 3 / 8」和「还能挖 2 镐」，快满时变黄提醒。',
+      '背包新增锁定：每格一个锁按钮。锁住的物品排到列表最下面，卖出按钮变灰，宿主也会拒绝卖出——不只是界面藏起来。锁定跨重启保留，适合把不想卖的消耗品先锁上。',
+      '开店：机器不再只卖茶和面包。之前卖货是从最便宜的商品开始吃产能，货架上只要有茶，一小时就被它吃光，蛋糕和宴席永远轮不到。现在改成轮转，每样按顺序各卖一件，四个货品都会动，机器卡片上还会写出各样卖了多少。',
+      '转生数值重做。原来星盘按 1.5 的指数涨价、单项上限 25 级，把整个星盘点满要 57168 星辰——按每次转生 5 星辰算是一万一千多次、约四百七十六年，等于不可能。现在星盘全满 459 星辰，约 35 次转生就能点满；另外转生本身也加了「重来奖励」：第一次 5 星辰，之后每次多给 1 个（最多 +10），所以每次重来都比上次更快。',
       '设置里新增「外观」分组：主题色（六种）、圆角（默认/更圆/方正）、成就墙密度（宽松/紧凑/最密）。改完立刻生效，不用重启。',
-      '主题色会用到按钮、徽章和选中状态上——不只是换一个色块。',
       '修了滚动卡顿：成就墙有两百多张卡，而页面每秒重绘一次。现在成就/关于/设置/公告这几个不需要倒计时的标签页不再跑那个心跳，成就卡也交给浏览器按需渲染（视口外的直接跳过）。',
       '钓鱼页只在有鱼线的时候才跑 10Hz 刷新，空闲时不再空转。',
     ],
@@ -1717,49 +1721,100 @@ export const FARM_PRODUCE = [
  * 萝卜 from being rolled as dungeon loot.
  */
 /**
- * 小卖部 — snacks bought with money and eaten for a resource.
+ * 小卖部 — one shop, two kinds of goods, sold ONLY at the bottom of 农场.
  *
- * Deliberately NOT a second currency sink like 商店（升级） or 开店（经营）: these
- * are the two resources that only come back with time — 体力 for mining and 物资
- * for expeditions — sold for money instead. That makes them a way to convert
- * money into TIME, which nothing else in the plugin offers.
+ * There are two groups on purpose:
+ *
+ *   · 零食 (kind 'stamina'/'supply') — bought into the PACK and eaten later.
+ *     These are the two resources that only come back with time (体力 for mining,
+ *     物资 for expeditions), so a snack is money converted into TIME. Nothing
+ *     else in the plugin offers that.
+ *   · 农场增益 (kind 'farm') — applied to every plot the moment they are bought,
+ *     because a farm buff that sat in the pack would just be a weaker 商店.
+ *
+ * The shop used to appear in several panels and was reported as clutter there,
+ * so it now renders in exactly one place (see the client's farm tab). It also
+ * briefly replaced the snacks entirely with farm buffs, which was read as "my
+ * cola disappeared" — hence two groups rather than one or the other.
  *
  * `kind: 'stamina'` is handled by `useItem` alongside the existing 'supply' and
  * buff kinds, so these appear in 背包 and are used from there like any other item.
  */
 export const SNACKS = [
+  // ── 零食：买了进背包，用的时候才生效 ──
   {
     id: 'cola',
     label: '可乐',
-    desc: '冰的。一口气灌下去，人就精神了。',
-    cost: { coin: 260 },
+    desc: '冰的，一口气灌下去，人立刻精神，还能再挖两镐。',
+    cost: { coin: 120 },
     rarity: 'common',
     kind: 'stamina',
-    stamina: 4,
-    accent: '--dsw-alias-state-warn-primary',
-    glyph: '◧',
+    stamina: 8,
+    group: '零食',
+    accent: '--dsw-alias-state-error-primary',
+    glyph: '🥤',
   },
   {
     id: 'sprite',
     label: '雪碧',
-    desc: '透心凉，气比可乐还足。',
-    cost: { coin: 520 },
+    desc: '带气的，路上喝一口，行囊也轻快些。',
+    cost: { coin: 90 },
     rarity: 'common',
-    kind: 'stamina',
-    stamina: 8,
+    kind: 'supply',
+    supply: 5,
+    group: '零食',
     accent: '--dsw-alias-state-success-primary',
-    glyph: '◨',
+    glyph: '🧊',
   },
   {
     id: 'icecream',
     label: '雪糕',
-    desc: '天热的时候，一根能撑起半天。装进包里带出门最合适。',
-    cost: { gold: 26 },
+    desc: '奶油味的，吃完心情好，腿也有劲。比可乐顶用。',
+    cost: { coin: 150 },
     rarity: 'uncommon',
-    kind: 'supply',
-    supply: 18,
+    kind: 'stamina',
+    stamina: 12,
+    group: '零食',
     accent: '--dsw-alias-link',
-    glyph: '◆',
+    glyph: '🍦',
+  },
+
+  // ── 农场增益：买了立刻对全场生效，不进背包 ──
+  {
+    id: 'fertilizer',
+    label: '化肥',
+    desc: '撒下去苗就蹿高。全场地块的生长速度 +50%，持续 2 小时。',
+    cost: { coin: 180 },
+    rarity: 'common',
+    kind: 'farm',
+    group: '农场增益',
+    buff: { id: 'farm-speed-1', label: '施肥', stat: 'farmGrowth', amount: 0.5, ms: 2 * 3_600_000 },
+    accent: '--dsw-alias-state-success-primary',
+    glyph: '◈',
+  },
+  {
+    id: 'sprinkler',
+    label: '洒水器',
+    desc: '自动浇两小时。这段时间里不用管缺水。',
+    cost: { coin: 320 },
+    rarity: 'common',
+    kind: 'farm',
+    group: '农场增益',
+    buff: { id: 'farm-water', label: '自动浇水', stat: 'farmWater', amount: 1, ms: 2 * 3_600_000 },
+    accent: '--dsw-alias-link',
+    glyph: '◉',
+  },
+  {
+    id: 'pesticide',
+    label: '驱虫剂',
+    desc: '喷完这一片干干净净。防止两小时不长虫。',
+    cost: { coin: 240 },
+    rarity: 'common',
+    kind: 'farm',
+    group: '农场增益',
+    buff: { id: 'farm-pest', label: '驱虫防护', stat: 'farmPest', amount: 1, ms: 2 * 3_600_000 },
+    accent: '--dsw-alias-state-error-primary',
+    glyph: '✚',
   },
 ]
 
@@ -2297,7 +2352,15 @@ export const FISH_ITEMS = FISH.map((entry) => ({
   glyph: entry.glyph,
 }))
 
-ALL_ITEMS.push(...ORES, ...FORAGE_EXTRA_ITEMS, ...FISH_ITEMS, ...SNACKS)
+/**
+ * Snacks join the union, EXCEPT the farm buffs.
+ *
+ * A pack item must be in `ALL_ITEMS` or `normalize` drops it on the next restart
+ * — which is exactly what would happen to a bought cola. Farm buffs are the
+ * opposite case: they never enter the pack (buying applies them instantly), so
+ * listing them as items would only offer `useItem` an id that can never exist.
+ */
+ALL_ITEMS.push(...ORES, ...FORAGE_EXTRA_ITEMS, ...FISH_ITEMS, ...SNACKS.filter((snack) => snack.kind !== 'farm'))
 void PRODUCE_BY_ID
 rebuildAllItems()
 
@@ -2508,18 +2571,43 @@ export function starsForLevel(level) {
 }
 
 /**
+ * Extra stars for having rebirthed before, capped.
+ *
+ * Without this, every rebirth pays exactly the same and the whole prestige loop
+ * is linear: a player who has done it ten times is no faster at doing it an
+ * eleventh. The bonus is what makes each run feed the next, which is the only
+ * reason a rebirth system is worth having.
+ */
+export const REBIRTH_COUNT_BONUS_CAP = 10
+
+export function rebirthCountBonus(count) {
+  return Math.min(Math.max(0, Math.floor(count)), REBIRTH_COUNT_BONUS_CAP)
+}
+
+/** What one rebirth actually pays: the level part plus the repeat-play part. */
+export function starsForRebirth(level, count) {
+  return starsForLevel(level) + rebirthCountBonus(count)
+}
+
+/**
  * 星盘 — permanent upgrades bought with 星辰, which survive a rebirth.
  *
  * These are the reason to rebirth at all: they make every later run faster and
  * they never reset. `starCost` is a pure function of the level.
+ *
+ * ⚠ The numbers here were rebalanced after a player pointed out that a rebirth
+ * felt worthless. The original table was base 1, growth 1.5–1.6, max 25, which
+ * totals 57,168 星辰 — at 5 星辰 per rebirth that is 11,434 rebirths, or roughly
+ * 476 years of play. The curve is still exponential (a long tail is fine), but
+ * `max` and `growth` now put a full chart at 459 星辰 ≈ 35 rebirths.
  */
 export const STAR_UPGRADES = [
-  { id: 'starYield', label: '星辉', desc: '所有签到奖励 +8%', max: 25, base: 1, growth: 1.5, effect: 'starYield', step: 0.08, accent: '--dsw-alias-state-warn-primary' },
-  { id: 'starOffline', label: '长夜', desc: '离线收益速率 +20%', max: 15, base: 1, growth: 1.6, effect: 'starOffline', step: 0.2, accent: '--dsw-alias-state-idle-primary' },
-  { id: 'starLuck', label: '吉星', desc: '签到额外掉落概率 +2%', max: 15, base: 2, growth: 1.55, effect: 'starLuck', step: 0.02, accent: '--dsw-alias-state-warn-primary' },
-  { id: 'starFortune', label: '星图', desc: '寻宝品质 +1', max: 12, base: 3, growth: 1.6, effect: 'starFortune', step: 1, accent: '--dsw-alias-link' },
-  { id: 'starStart', label: '启程', desc: '转生后额外获得 800 金币', max: 10, base: 2, growth: 1.5, effect: 'starStart', step: 800, accent: '--dsw-alias-state-success-primary' },
-  { id: 'starPack', label: '星辰行囊', desc: '背包容量 +10 件', max: 12, base: 2, growth: 1.5, effect: 'starPack', step: 10, accent: '--dsw-alias-state-business-primary' },
+  { id: 'starYield', label: '星辉', desc: '所有签到奖励 +8%', max: 12, base: 1, growth: 1.35, effect: 'starYield', step: 0.08, accent: '--dsw-alias-state-warn-primary' },
+  { id: 'starOffline', label: '长夜', desc: '离线收益速率 +20%', max: 12, base: 1, growth: 1.35, effect: 'starOffline', step: 0.2, accent: '--dsw-alias-state-idle-primary' },
+  { id: 'starLuck', label: '吉星', desc: '签到额外掉落概率 +2%', max: 12, base: 1, growth: 1.35, effect: 'starLuck', step: 0.02, accent: '--dsw-alias-state-warn-primary' },
+  { id: 'starFortune', label: '星图', desc: '寻宝品质 +1', max: 10, base: 1, growth: 1.35, effect: 'starFortune', step: 1, accent: '--dsw-alias-link' },
+  { id: 'starStart', label: '启程', desc: '转生后额外获得 800 金币', max: 10, base: 1, growth: 1.35, effect: 'starStart', step: 800, accent: '--dsw-alias-state-success-primary' },
+  { id: 'starPack', label: '星辰行囊', desc: '背包容量 +10 件', max: 10, base: 1, growth: 1.35, effect: 'starPack', step: 10, accent: '--dsw-alias-state-business-primary' },
 ]
 
 const STAR_UPGRADE_BY_ID = new Map(STAR_UPGRADES.map((entry) => [entry.id, entry]))
@@ -2698,7 +2786,7 @@ function defaultSave() {
      * empty plot. Length is the source of truth for how many plots exist, so a
      * purchased plot cannot be lost by a rounding bug elsewhere.
      */
-    farm: { plots: Array.from({ length: FARM_PLOTS_BASE }, () => null), harvested: 0, byCrop: {}, tended: 0 },
+    farm: { plots: Array.from({ length: FARM_PLOTS_BASE }, () => null), harvested: 0, byCrop: {}, tended: 0, dug: 0 },
     /**
      * The mine.
      *
@@ -3496,6 +3584,15 @@ export function apply(ctx, config = {}) {
     // count. Rows are re-merged by id so a hand-edited save cannot hold two
     // stacks of the same item.
     const packCounts = new Map()
+    /**
+     * Which stacks the player has locked.
+     *
+     * Kept as a separate set because `packCounts` merges duplicate rows and would
+     * otherwise throw the flag away — and a lock that silently disappears on the
+     * next restart is worse than no lock at all, since the whole point is that a
+     * consumable you are saving does not get sold by accident.
+     */
+    const packLocked = new Set()
     if (Array.isArray(raw.pack)) {
       for (const row of raw.pack) {
         if (row === null || typeof row !== 'object') continue
@@ -3503,9 +3600,14 @@ export function apply(ctx, config = {}) {
         const count = Math.max(0, Math.floor(num(row.count, 0)))
         if (count === 0) continue
         packCounts.set(row.item, (packCounts.get(row.item) ?? 0) + count)
+        if (row.locked === true) packLocked.add(row.item)
       }
     }
-    const pack = [...packCounts.entries()].map(([item, count]) => ({ item, count }))
+    const pack = [...packCounts.entries()].map(([item, count]) => ({
+      item,
+      count,
+      locked: packLocked.has(item),
+    }))
 
     const rawExpedition = raw.expedition !== undefined && raw.expedition !== null ? raw.expedition : {}
     const found = {}
@@ -3681,6 +3783,8 @@ export function apply(ctx, config = {}) {
       harvested: Math.max(0, Math.round(num(rawFarm.harvested, 0))),
       byCrop: farmByCrop,
       tended: Math.max(0, Math.round(num(rawFarm.tended, 0))),
+      /** How many crops were dug up and thrown away. Statistics only. */
+      dug: Math.max(0, Math.round(num(rawFarm.dug, 0))),
     }
 
     /**
@@ -3914,6 +4018,14 @@ export function apply(ctx, config = {}) {
         hours: hours > 0 ? hours : Math.min(24 * 30, Math.ceil(soldTotal / Math.max(1, machine.perHour))),
         soldTotal,
         idleHours: Math.max(0, Math.floor(num(source?.idleHours, 0))),
+        /**
+         * Where the rotation resumes.
+         *
+         * Persisted so a machine left running overnight keeps serving the whole
+         * menu instead of restarting from the first product on every collection —
+         * without this, the cheapest item would still win every single session.
+         */
+        cursor: Math.max(0, Math.round(num(source?.cursor, 0))),
       }
     }
     const shopByProduct = {}
@@ -4726,6 +4838,21 @@ export function apply(ctx, config = {}) {
   }
 
   /**
+   * Lock or unlock a stack, so it cannot be sold.
+   *
+   * Requested by a player who wanted to keep consumables out of the sell list
+   * ("一些消耗品不想卖的可以锁定一下"). The flag lives on the pack row itself and
+   * is honoured by `sellItem`, which is the only path that turns goods into money.
+   */
+  function togglePackLock(itemId) {
+    const row = save.pack.find((entry) => entry.item === itemId)
+    if (row === undefined) throw new Error(`背包里没有这一格`)
+    row.locked = row.locked !== true
+    persist()
+    return { item: itemId, locked: row.locked }
+  }
+
+  /**
    * Sell one item from the pack.
    *
    * `haggle` multiplies the base price, and the multiplier is reported so the UI
@@ -4738,6 +4865,17 @@ export function apply(ctx, config = {}) {
 
     const row = save.pack.find((entry) => entry.item === itemId)
     if (row === undefined || row.count <= 0) throw new Error(`背包里没有「${item.label}」`)
+    /**
+     * A locked stack is refused HERE, not merely hidden in the UI.
+     *
+     * The lock exists so a consumable you are saving cannot be sold by accident,
+     * and "accident" includes a stale button, a bulk action, or a future caller
+     * that never learned about locks. Enforcing it at the one place that actually
+     * moves the money is the only version of the rule that holds.
+     */
+    if (row.locked === true) {
+      throw new Error(`「${item.label}」已锁定，先解锁再卖。`)
+    }
 
     const amount = Math.max(1, Math.min(Math.floor(count), row.count))
     const mods = modifiers()
@@ -4789,33 +4927,71 @@ export function apply(ctx, config = {}) {
    * three item kinds from being interchangeable.
    */
   /**
-   * Buy one snack from 小卖部.
+   * Buy one thing from 小卖部.
    *
-   * The item lands in the PACK rather than being consumed on the spot: it is an
-   * item like any other, so it can be carried on an expedition and eaten when it
-   * is needed. Buying-and-immediately-using would make 雪糕 useless for the one
-   * thing it is good at.
+   * The two groups behave differently on purpose:
+   *
+   *   · 零食 lands in the PACK rather than being consumed on the spot — it is an
+   *     item like any other, so it can be carried on an expedition and drunk when
+   *     it is needed. Buying-and-immediately-using would make 雪糕 useless for
+   *     the one thing it is good at.
+   *   · 农场增益 applies to the whole farm immediately, because there is nothing
+   *     to carry: it is a state, not a thing.
    */
   function buySnack(snackId, now = Date.now()) {
     const snack = SNACK_BY_ID.get(snackId)
     if (snack === undefined) throw new Error(`小卖部没有这个：${snackId}`)
-    const mods = modifiers()
-    if (packUsed() >= mods.packSize) throw new Error('背包满了，先卖掉或者用掉点东西。')
     if (!canAfford(snack.cost)) throw new Error(`买不起「${snack.label}」：${describeShortfall(snack.cost)}`)
 
     for (const [key, amount] of Object.entries(snack.cost)) save.currencies[key] -= amount
     recordSpend(snack.cost, now)
-    addToPack(snack.id, 1)
+
+    // ── 零食：进背包，之后自己决定什么时候用 ──
+    if (snack.kind !== 'farm') {
+      addToPack(snack.id, 1)
+      bumpDaily('snacks', 1, now)
+      claimSeq += 1
+      pushHistory({ id: claimSeq, at: now, kind: 'snack', label: snack.label, paid: snack.cost })
+      const unlockedSnack = reconcileAchievements(now)
+      for (const entry of unlockedSnack) {
+        claimSeq += 1
+        pushHistory({ id: claimSeq, at: now, kind: 'achievement', achievement: entry.id, label: entry.label })
+      }
+      persist()
+      return { snack: snack.id, label: snack.label, paid: snack.cost, intoPack: true, unlocked: unlockedSnack }
+    }
+
+    /**
+     * Farm buffs apply to the WHOLE farm and extend by REFRESH, not by stacking.
+     *
+     * A buff with the same id just extends: two fertilizers in a row means two
+     * hours of faster growth, not four — re-using the same item cannot be farmed
+     * into a permanent state (the same rule every other buff follows).
+     */
+    const until = now + snack.buff.ms
+    const existing = save.buffs.find((buff) => buff.id === snack.buff.id)
+    if (existing === undefined) {
+      save.buffs.push({
+        id: snack.buff.id,
+        label: snack.buff.label,
+        stat: snack.buff.stat,
+        amount: snack.buff.amount,
+        until,
+      })
+    } else {
+      existing.until = Math.max(existing.until, until)
+    }
+    bumpDaily('snacks', 1, now)
 
     claimSeq += 1
-    pushHistory({ id: claimSeq, at: now, kind: 'snack', label: snack.label, paid: snack.cost })
+    pushHistory({ id: claimSeq, at: now, kind: 'snack', label: snack.label, paid: snack.cost, buff: snack.buff })
     const unlocked = reconcileAchievements(now)
     for (const entry of unlocked) {
       claimSeq += 1
       pushHistory({ id: claimSeq, at: now, kind: 'achievement', achievement: entry.id, label: entry.label })
     }
     persist()
-    return { snack: snack.id, label: snack.label, paid: snack.cost, unlocked }
+    return { snack: snack.id, label: snack.label, paid: snack.cost, buff: snack.buff, until, unlocked }
   }
 
   function useItem(itemId, now = Date.now()) {
@@ -4935,7 +5111,10 @@ export function apply(ctx, config = {}) {
         // One ailment at a time: two would make neglect feel punitive. The roll
         // is scaled by the player's 病害频率 setting, so 0 means never.
         if (plot.ailments.length === 0 && Math.random() * 1000 < AILMENT_CHANCE * ailmentRate) {
-          const options = AILMENTS.filter((entry) => !plot.ailments.includes(entry.id))
+          // 驱虫防护 (小卖部): pests cannot spawn while it is active. Other
+          // ailments (缺水 / 杂草) still can — the spray is not a general cure.
+          const blocked = farmPestBlocked(now) ? ['pest'] : []
+          const options = AILMENTS.filter((entry) => !plot.ailments.includes(entry.id) && !blocked.includes(entry.id))
           if (options.length > 0) {
             plot.ailments.push(options[Math.floor(Math.random() * options.length)].id)
           }
@@ -4960,7 +5139,31 @@ export function apply(ctx, config = {}) {
     let rate = 1
     if (plot.wateredUntil > at) rate += WATER_BONUS
     rate -= plot.ailments.length * AILMENT_PENALTY
+    // 施肥 (小卖部) — a flat +0.5 on top of everything else, so it stacks with
+    // watering but cannot be negated by ailments below the floor.
+    if (hasBuff('farm-speed-1', at)) rate += 0.5
     return Math.max(MIN_GROWTH_RATE, rate)
+  }
+
+  /** Whether a named buff is currently active. Used by the farm buffs. */
+  function hasBuff(id, at = Date.now()) {
+    return save.buffs.some((buff) => buff.id === id && buff.until > at)
+  }
+
+  /**
+   * 自动浇水 — while active, every plot counts as watered.
+   *
+   * Implemented as a read-time override in `growthRate` and `plotView` rather
+   * than a write-time loop: writing `wateredUntil` to every plot on every tick
+   * would make the buff permanent once it expired (the flag would outlive it).
+   */
+  function farmWaterActive(at = Date.now()) {
+    return hasBuff('farm-water', at)
+  }
+
+  /** 驱虫防护 — while active, no new pests can be rolled. */
+  function farmPestBlocked(at = Date.now()) {
+    return hasBuff('farm-pest', at)
   }
 
   /** Settle every plot. Cheap enough to run on each read. */
@@ -4993,7 +5196,7 @@ export function apply(ctx, config = {}) {
       rate: growthRate(plot, now),
       /** Rate × the player's speed setting: what the ETA is based on. */
       effectiveRate,
-      watered: plot.wateredUntil > now,
+      watered: plot.wateredUntil > now || farmWaterActive(now),
       wateredMs: Math.max(0, plot.wateredUntil - now),
       /** The full ailment records, not just ids, so the UI can render them. */
       ailments: plot.ailments.map((id) => AILMENT_BY_ID.get(id)).filter(Boolean),
@@ -5223,6 +5426,92 @@ export function apply(ctx, config = {}) {
     return { harvested: results.length, stored, lost, failures }
   }
 
+  /**
+   * Fill every empty plot with the same crop.
+   *
+   * Fills until either the plots or the MONEY runs out — it does not leave a
+   * half-funded state, because `plant` charges per plot and a failure halfway
+   * through would otherwise keep the earlier charges with no way to see why.
+   * The return value reports exactly how many went in and what stopped it.
+   */
+  function plantAll(cropId, now = Date.now()) {
+    settleFarm(now)
+    const crop = CROP_BY_ID.get(cropId)
+    if (crop === undefined) throw new Error(`没有这种作物：${cropId}`)
+
+    const empty = []
+    for (let i = 0; i < save.farm.plots.length; i += 1) {
+      if (save.farm.plots[i] === null) empty.push(i)
+    }
+    if (empty.length === 0) throw new Error('没有空地了 —— 先收获或者铲掉一块。')
+
+    const planted = []
+    let stoppedBy = null
+    for (const index of empty) {
+      if (!canAfford(crop.seed)) {
+        stoppedBy = 'money'
+        break
+      }
+      try {
+        planted.push(plant(index, cropId, now))
+      } catch (error) {
+        stoppedBy = messageOf(error)
+        break
+      }
+    }
+
+    if (planted.length === 0) {
+      throw new Error(stoppedBy === 'money' ? `种子不够：${describeShortfall(crop.seed)}` : String(stoppedBy))
+    }
+    return {
+      crop: crop.id,
+      label: crop.label,
+      planted: planted.length,
+      plots: planted.map((entry) => entry.plot),
+      stoppedBy,
+    }
+  }
+
+  /**
+   * Dig up a crop. Yields NOTHING.
+   *
+   * This is the escape hatch for "I planted the wrong thing". It refunds neither
+   * the seed nor the time — that is deliberate: a free undo would make the seed
+   * cost meaningless, since any plot could be repurposed at any moment. What you
+   * pay for a misplant is the seed, and what you get back is the plot.
+   */
+  function digUp(index, now = Date.now()) {
+    settleFarm(now)
+    if (!Number.isInteger(index) || index < 0 || index >= save.farm.plots.length) {
+      throw new Error(`没有第 ${index + 1} 块地`)
+    }
+    const plot = save.farm.plots[index]
+    if (plot === null) throw new Error('这块地本来就是空的。')
+    const crop = CROP_BY_ID.get(plot.crop)
+
+    save.farm.plots[index] = null
+    save.farm.dug = (save.farm.dug ?? 0) + 1
+
+    claimSeq += 1
+    pushHistory({
+      id: claimSeq,
+      at: now,
+      kind: 'dig',
+      label: crop?.label ?? plot.crop,
+      plot: index,
+      /** Explicitly zero, so the history row cannot imply a refund. */
+      granted: {},
+    })
+    persist()
+    return {
+      plot: index,
+      crop: plot.crop,
+      label: crop?.label ?? plot.crop,
+      // Stated in the payload so the UI does not have to invent reassuring copy.
+      refunded: false,
+    }
+  }
+
   /** Buy one more plot. */
   function expandFarm(now = Date.now()) {
     const owned = save.farm.plots.length
@@ -5338,8 +5627,37 @@ export function apply(ctx, config = {}) {
   }
 
   /** One swing of the pickaxe. */
+  /** How many ore the swing bag holds. Upgrades raise it. */
+  function bagCapacity() {
+    return 8 + mineMods().packCap
+  }
+
+  /** How many ore are sitting in the swing bag right now. */
+  function bagUsed() {
+    return Object.values(save.mine.bufferedSwing).reduce((sum, n) => sum + n, 0)
+  }
+
+  /** Whether the swing bag is full, so a swing would be wasted. */
+  function bagFull() {
+    return bagUsed() >= bagCapacity()
+  }
+
   function swing(now = Date.now()) {
     regenStamina(now)
+
+    /**
+     * Refuse BEFORE spending anything when the swing bag is full.
+     *
+     * The check used to live after the vein broke, by which point the stamina
+     * was already gone and the vein had already been destroyed — so a full bag
+     * silently ate one stamina AND a whole vein per attempt. Checking up front
+     * is the difference between "you cannot swing yet" and "you just lost a
+     * vein for nothing", which is exactly what was reported.
+     */
+    if (bagFull()) {
+      throw new Error(`矿袋满了（${bagUsed()}/${bagCapacity()}），先收取再挖，不然这一下会白挖。`)
+    }
+
     if (save.mine.stamina < SWING_STAMINA) {
       const waitMs = save.mine.staminaAt + STAMINA_REGEN_MS - now
       throw new Error(
@@ -5367,9 +5685,12 @@ export function apply(ctx, config = {}) {
       // damage, which would make a strong pickaxe yield duplicates.
       const ore = ORE_BY_ID.get(vein.ore)
       save.mine.vein = null
-      const capacity = 8 + mineMods().packCap
-      const used = Object.values(save.mine.bufferedSwing).reduce((sum, n) => sum + n, 0)
-      if (used >= capacity) {
+      /**
+       * Safety net only — the real check is at the top of this function, before
+       * any stamina is spent. Reaching here would mean the bag filled up during
+       * a single swing, which one ore cannot do.
+       */
+      if (bagUsed() >= bagCapacity()) {
         pushHistory({
           id: ++claimSeq,
           at: now,
@@ -5377,7 +5698,7 @@ export function apply(ctx, config = {}) {
           label: ore.label,
           ore: ore.id,
         })
-        throw new Error(`矿袋满了（${capacity}），先收取背包`)
+        throw new Error(`矿袋满了（${bagUsed()}/${bagCapacity()}），先收取再挖。`)
       }
       save.mine.bufferedSwing[ore.id] = (save.mine.bufferedSwing[ore.id] ?? 0) + 1
       save.mine.stats.byOre[ore.id] = (save.mine.stats.byOre[ore.id] ?? 0) + 1
@@ -6146,20 +6467,42 @@ export function apply(ctx, config = {}) {
 
       let capacity = hours * machine.perHour
       let sold = 0
-      for (const product of SHOP_PRODUCTS) {
-        if (capacity <= 0) break
-        if (!productUnlocked(product)) continue
-        const available = save.shop.stock[product.id] ?? 0
-        if (available <= 0) continue
-        const take = Math.min(capacity, available)
-        if (take <= 0) continue
-        save.shop.stock[product.id] = available - take
-        capacity -= take
-        sold += take
-        owned.byProduct[product.id] = (owned.byProduct[product.id] ?? 0) + take
-        for (const [key, value] of Object.entries(salePrice(product))) {
-          owned.buffered[key] = (owned.buffered[key] ?? 0) + value * take
+      /**
+       * The machine serves the whole menu in ROTATION, not cheapest-first.
+       *
+       * It used to walk SHOP_PRODUCTS in order and let each product take as much
+       * capacity as it could. Since the list runs cheapest to dearest, a well
+       * stocked 茶 ate the entire hour and the loop broke out before ever
+       * reaching 蛋糕 or 宴席 — reported as "所有机器都只会卖茶和面包，两个货品滞销".
+       * Selling dearest-first would only invert the complaint, so the fix is a
+       * rotating cursor: one unit from each product in turn, every product moves.
+       */
+      const sellable = SHOP_PRODUCTS.filter(
+        (product) => productUnlocked(product) && (save.shop.stock[product.id] ?? 0) > 0,
+      )
+      if (sellable.length > 0) {
+        let cursor = Math.max(0, Math.round(num(owned.cursor, 0))) % sellable.length
+        while (capacity > 0) {
+          let servedOne = false
+          for (let step = 0; step < sellable.length && capacity > 0; step += 1) {
+            const index = (cursor + step) % sellable.length
+            const product = sellable[index]
+            if ((save.shop.stock[product.id] ?? 0) <= 0) continue
+            save.shop.stock[product.id] -= 1
+            capacity -= 1
+            sold += 1
+            owned.byProduct[product.id] = (owned.byProduct[product.id] ?? 0) + 1
+            for (const [key, value] of Object.entries(salePrice(product))) {
+              owned.buffered[key] = (owned.buffered[key] ?? 0) + value
+            }
+            cursor = (index + 1) % sellable.length
+            servedOne = true
+            break
+          }
+          // Nothing anywhere has stock: stop rather than spin.
+          if (!servedOne) break
         }
+        owned.cursor = cursor
       }
 
       // Wage is charged per hour the machine actually worked. A machine that
@@ -6446,7 +6789,12 @@ export function apply(ctx, config = {}) {
       level,
       required: REBIRTH_LEVEL,
       eligible: level >= REBIRTH_LEVEL,
-      stars: level >= REBIRTH_LEVEL ? starsForLevel(level) : 0,
+      /** What the level alone is worth. */
+      starsFromLevel: level >= REBIRTH_LEVEL ? starsForLevel(level) : 0,
+      /** The repeat-play part, which is what makes later runs faster. */
+      starsFromCount: rebirthCountBonus(save.rebirth.count),
+      /** The total this rebirth would pay. */
+      stars: level >= REBIRTH_LEVEL ? starsForRebirth(level, save.rebirth.count) : 0,
       missing: Math.max(0, REBIRTH_LEVEL - level),
       count: save.rebirth.count,
       bestLevel: save.rebirth.bestLevel,
@@ -6470,7 +6818,9 @@ export function apply(ctx, config = {}) {
       throw new Error(`需要达到 ${REBIRTH_LEVEL} 级才能转生（现在是 ${level} 级）`)
     }
 
-    const gained = starsForLevel(level)
+    // Level part plus the repeat-play bonus, so the tenth rebirth pays more than
+    // the first and the loop actually accelerates.
+    const gained = starsForRebirth(level, save.rebirth.count)
     const mods = modifiers()
     const startGold = mods.startGold
     const previousBest = save.rebirth.bestLevel
@@ -6659,7 +7009,17 @@ export function apply(ctx, config = {}) {
         // Seconds until the next unit, so the UI can count down locally.
         nextIn: Math.max(0, Math.round((save.supplies.regenAt + SUPPLY_REGEN_MS - now) / 1000)),
       },
-      pack: save.pack.map((row) => ({ item: row.item, count: row.count })),
+      /**
+       * Pack rows, unlocked first.
+       *
+       * The sort happens here rather than in the panel so EVERY reader sees the
+       * same order: locked stacks sink to the bottom of the list, which is the
+       * point of locking them ("锁定的物品排到最下面").
+       */
+      pack: [...save.pack]
+        .sort((a, b) => (a.locked === true ? 1 : 0) - (b.locked === true ? 1 : 0))
+        .map((row) => ({ item: row.item, count: row.count, locked: row.locked === true })),
+      packLockedCount: save.pack.filter((row) => row.locked === true).length,
       packUsed: packUsed(),
       packSize: mods.packSize,
       // Extended trip state: gathered bag, gather cooldown and sleep readiness,
@@ -6717,6 +7077,7 @@ export function apply(ctx, config = {}) {
        */
       farmByCrop: { ...save.farm.byCrop },
       farmTended: save.farm.tended,
+      farmDug: save.farm.dug ?? 0,
       farmPlots: save.farm.plots.length,
       farmPlanted: save.farm.plots.filter((plot) => plot !== null).length,
       farmReady: save.farm.plots.filter((plot) => plot !== null && plotView(plot, now).ready).length,
@@ -7262,11 +7623,29 @@ export function apply(ctx, config = {}) {
         desc: snack.desc,
         cost: snack.cost,
         kind: snack.kind,
-        amount: snack.kind === 'stamina' ? snack.stamina : snack.supply,
+        /** Which shelf it belongs on: 零食 or 农场增益. */
+        group: snack.group,
+        rarity: snack.rarity,
+        /**
+         * What the snack restores, for the pack-eating kind.
+         *
+         * Reported as the same `amount` shape the panel already renders, so a
+         * 可乐 card and a 化肥 card can share one layout.
+         */
+        amount: snack.kind === 'stamina' ? snack.stamina : snack.kind === 'supply' ? snack.supply : undefined,
+        /** What it does to the farm, for the instant-effect kind. */
+        buff: snack.buff === undefined ? undefined : { ...snack.buff },
+        /** Whether the same farm effect is already running. */
+        active: snack.buff === undefined ? false : hasBuff(snack.buff.id),
+        /** Seconds left on the running effect, or 0. */
+        remainingMs: (() => {
+          if (snack.buff === undefined) return 0
+          const found = save.buffs.find((entry) => entry.id === snack.buff.id)
+          return found === undefined ? 0 : Math.max(0, found.until - now)
+        })(),
         accent: snack.accent,
         glyph: snack.glyph,
         affordable: canAfford(snack.cost),
-        packRoom: packUsed() < modifiers().packSize,
       })),
       items: ALL_ITEMS.map((item) => ({
         id: item.id,
@@ -7359,7 +7738,13 @@ export function apply(ctx, config = {}) {
                 },
           veinCapacity: 8 + mods.packCap,
           bufferedSwing: { ...save.mine.bufferedSwing },
-          bufferedTotal: Object.values(save.mine.bufferedSwing).reduce((sum, n) => sum + n, 0),
+          bufferedTotal: bagUsed(),
+        /** Swing-bag occupancy, so the UI can show "how many swings are left". */
+        bagCapacity: bagCapacity(),
+        bagUsed: bagUsed(),
+        bagFull: bagFull(),
+        /** Swings before the bag fills, at the current pickaxe. 0 when full. */
+        bagSwingsLeft: Math.max(0, bagCapacity() - bagUsed()),
           stats: { ...save.mine.stats },
           bands: MINE_BANDS,
           minDepth: 1,
@@ -7510,6 +7895,15 @@ export function apply(ctx, config = {}) {
             buffered,
             /** Units sold since the last collection. */
             soldTotal,
+            /**
+             * Units sold PER PRODUCT since the last collection.
+             *
+             * Exposed so the panel can show what the machine actually moved.
+             * Without it a machine that only ever sold 茶 looks exactly like one
+             * serving the whole menu — which is why the staleness of 蛋糕/宴席
+             * went unnoticed until a player stocked them and watched them rot.
+             */
+            byProduct: active ? { ...owned.byProduct } : {},
             /** Hours worked, i.e. what the wage will be charged for. */
             hours: active ? owned.hours : 0,
             /** The wage that collecting right now would charge. */
@@ -8250,6 +8644,11 @@ export function apply(ctx, config = {}) {
           )
           return send(200, { ...snapshot(), result })
         }
+        if (method === 'POST' && routePath === '/pack-lock') {
+          const body = await readJson(req)
+          const result = togglePackLock(typeof body.item === 'string' ? body.item : '')
+          return send(200, { ...snapshot(), result })
+        }
         if (method === 'POST' && routePath === '/quest') {
           const body = await readJson(req)
           const result = claimQuest(typeof body.id === 'string' ? body.id : '')
@@ -8400,6 +8799,16 @@ export function apply(ctx, config = {}) {
         if (method === 'POST' && routePath === '/shop-collect') {
           const body = await readJson(req)
           const result = collectMachine(typeof body.machine === 'string' ? body.machine : '')
+          return send(200, { ...snapshot(), result })
+        }
+        if (method === 'POST' && routePath === '/plant-all') {
+          const body = await readJson(req)
+          const result = plantAll(typeof body.crop === 'string' ? body.crop : '')
+          return send(200, { ...snapshot(), result })
+        }
+        if (method === 'POST' && routePath === '/dig') {
+          const body = await readJson(req)
+          const result = digUp(num(body.plot, -1))
           return send(200, { ...snapshot(), result })
         }
         if (method === 'POST' && routePath === '/plant') {
