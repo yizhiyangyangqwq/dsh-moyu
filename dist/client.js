@@ -185,11 +185,10 @@ window.__ModuleLoader__.load({
      * One poller per mounted component. The host is the only clock that matters,
      * so a claim always re-reads state rather than patching it locally.
      */
-    function useCheckin(pollMs, heartbeat = true) {
+    function useCheckin(pollMs) {
       const [data, setData] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
-      const [tick, setTick] = React.useState(0)
 
       const load = React.useCallback(async () => {
         try {
@@ -213,20 +212,6 @@ window.__ModuleLoader__.load({
           clearInterval(timer)
         }
       }, [load, pollMs])
-
-      /**
-       * A local 1s heartbeat, but only where a countdown is actually drawn.
-       *
-       * It used to run on every tab, which meant the achievements wall — 213
-       * cards — was rebuilt once a second while you were scrolling it. That was
-       * the reported jank. The caller decides, because only the page knows which
-       * tab is showing.
-       */
-      React.useEffect(() => {
-        if (!heartbeat) return undefined
-        const timer = setInterval(() => setTick((value) => value + 1), 1000)
-        return () => clearInterval(timer)
-      }, [heartbeat])
 
       const claim = React.useCallback(
         async (period) => {
@@ -1133,7 +1118,6 @@ window.__ModuleLoader__.load({
         buyMachine,
         collectMachine,
         reload: load,
-        tick,
       }
     }
 
@@ -1550,14 +1534,7 @@ window.__ModuleLoader__.load({
      * One lookup table rather than a component per tab: the icons carry no
      * meaning beyond "which tab is this", so a shape map is the whole job.
      */
-    /**
-     * Tabs whose contents do not change with the clock.
-     *
-     * The page heartbeat exists to move countdowns; on these tabs there is
-     * nothing to move, so it is skipped entirely. 成就 matters most: it renders
-     * one card per achievement (200+) and was being rebuilt every second.
-     */
-    const STATIC_TABS = new Set(['ach', 'about', 'settings', 'notice'])
+    
 
     const TAB_GLYPHS = {
       claim: '◷',
@@ -2965,8 +2942,7 @@ window.__ModuleLoader__.load({
         buyMachine,
         collectMachine,
         reload,
-        tick,
-      } = useCheckin(PANEL_POLL_MS, !STATIC_TABS.has(tab))
+      } = useCheckin(PANEL_POLL_MS)
       const [toast, setToast] = React.useState(null)
       const [showLocked, setShowLocked] = React.useState(false)
       /** Which plot is armed for digging (two-click confirm). */
