@@ -67,7 +67,7 @@ const HISTORY_LIMIT = 60
  * the two agree — because a version that only exists in one of them is exactly
  * the bug that makes an updater compare a stale value against a fresh one.
  */
-export const VERSION = '1.6.0'
+export const VERSION = '1.6.1'
 
 /**
  * Where updates are fetched from.
@@ -111,6 +111,15 @@ const UPDATE_FILES = ['index.js', 'client.js', 'package.json']
  * changed.
  */
 export const CHANGELOG = [
+  {
+    version: '1.6.1',
+    date: '2026-11-18',
+    title: '性能与代码整理',
+    notes: [
+      '去掉了每秒一次的空转刷新。客户端原本不管在哪个标签页都每秒重绘一次，而这些刷新大部分没有任何用途；钓鱼页在没下竿时也不再空转。只有真正需要倒计时的地方仍然按自己的节奏刷新。',
+      '宿主读取状态时，重复计算了 11 次加成值——每次快照都要把商店和星盘的重项算一遍。现在一次快照只算一次，动作更快，界面更跟手，玩法和数值都没有改动。',
+    ],
+  },
   {
     version: '1.6.0',
     date: '2026-10-25',
@@ -4160,8 +4169,16 @@ export function apply(ctx, config = {}) {
    * `yields` is per period: a claim's base reward is multiplied by both the
    * streak multiplier and its period's yield multiplier. `luck` shifts the
    * chance of a bonus drop. `grace` widens the missed-slot tolerance.
+   *
+   * Memoized per `now` timestamp: `snapshot()` clears the cache at the start,
+   * so all 11 calls within one snapshot share the same computation.
    */
-  function modifiers() {
+  let modifiersCache = { at: 0, value: null }
+  function modifiers(now = Date.now()) {
+    if (modifiersCache.at === now && modifiersCache.value !== null) {
+      return modifiersCache.value
+    }
+
     const yields = {}
     let luck = 0
     let grace = 0
@@ -4205,7 +4222,6 @@ export function apply(ctx, config = {}) {
     // Active item buffs stack on top of the permanent upgrades. They are stored
     // with an expiry so a buff cannot outlive its stated duration across
     // restarts.
-    const now = Date.now()
     for (const buff of save.buffs) {
       if (buff.until <= now) continue
       if (buff.stat === 'luck') luck += buff.amount
@@ -4244,7 +4260,7 @@ export function apply(ctx, config = {}) {
     offlineRate *= settings.offlineMultiplier
     starYield *= settings.rewardMultiplier
 
-    return {
+    const result = {
       yields,
       luck,
       grace,
@@ -4263,6 +4279,8 @@ export function apply(ctx, config = {}) {
       ailmentRate: settings.ailmentRate,
       supplyRegenMultiplier: settings.supplyRegenMultiplier,
     }
+    modifiersCache = { at: now, value: result }
+    return result
   }
 
   /** Drop expired buffs. Called wherever buffs are read for display or effect. */
@@ -7546,6 +7564,9 @@ export function apply(ctx, config = {}) {
   }
 
   function snapshot(now = Date.now()) {
+    // Clear modifiers cache so all calls within this snapshot share one computation.
+    modifiersCache.at = 0
+
     // Bring every time-based system up to date before reporting it, so the panel
     // shows what has accrued since the last read rather than the last write.
     accrual(now)
